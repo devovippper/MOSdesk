@@ -69,6 +69,28 @@ static void fill_rect(int32_t x, int32_t y, int32_t width, int32_t height,
     }
 }
 
+static void draw_cursor_icon(int32_t x, int32_t y, uint32_t scale,
+                             uint32_t fill_color) {
+    static const char* const shape[] = {
+        "#...........", "##..........", "#x#.........",
+        "#xx#........", "#xxx#.......", "#xxxx#......",
+        "#xxxxx#.....", "#xxxxxx#....", "#xxxxxxx#...",
+        "#xxxxxxxx#..", "#xxxxx###...", "#xx#xx#......",
+        "...#..#......", "...#..#......", "....##......."
+    };
+    for (uint32_t row = 0; row < sizeof(shape) / sizeof(shape[0]); row++) {
+        for (uint32_t column = 0; column < 12u; column++) {
+            uint32_t color = shape[row][column] == '#'
+                ? 0xFF263640u : shape[row][column] == 'x'
+                    ? fill_color : 0u;
+            if (color)
+                fill_rect(x + (int32_t)(column * scale),
+                          y + (int32_t)(row * scale),
+                          (int32_t)scale, (int32_t)scale, color);
+        }
+    }
+}
+
 static void draw_text(int32_t x, int32_t y, const char* text,
                       uint32_t color, bool large) {
     ttrend_surface_t target = text_target();
@@ -120,6 +142,14 @@ static void draw_control_labels(void) {
                   0xFF34434Cu, false);
         draw_text((int32_t)NAV_WIDTH + 85, 201, "200%",
                   0xFF34434Cu, false);
+        draw_text((int32_t)NAV_WIDTH + 22, 220, "Pack",
+                  0xFF34434Cu, false);
+        draw_text((int32_t)NAV_WIDTH + 43, 243, "Posy",
+                  preferences.cursor_pack == MOSDESK_CURSOR_PACK_POSY
+                      ? 0xFFFFFFFFu : 0xFF34434Cu, false);
+        draw_text((int32_t)NAV_WIDTH + 139, 243, "Classic",
+                  preferences.cursor_pack == MOSDESK_CURSOR_PACK_CLASSIC
+                      ? 0xFFFFFFFFu : 0xFF34434Cu, false);
     }
 }
 
@@ -140,10 +170,8 @@ static void draw_window(void) {
     draw_text(16, 15, "MOSdesk Settings", 0xFF273640u, true);
     moswm_draw_file_icon(surface.pixels, surface.width, surface.height,
                          20, 56, MOSWM_ICON_SETTINGS);
-    moswm_draw_file_icon(surface.pixels, surface.width, surface.height,
-                         20, 94, MOSWM_ICON_POINTER);
-    moswm_draw_file_icon(surface.pixels, surface.width, surface.height,
-                         20, 132, MOSWM_ICON_POINTER);
+    draw_cursor_icon(27, 98, 1u, 0xFF34434Cu);
+    draw_cursor_icon(27, 136, 1u, 0xFF34434Cu);
     draw_text(54, 65, "Appearance", 0xFF34434Cu, false);
     draw_text(54, 103, "Mouse", 0xFF34434Cu, false);
     draw_text(54, 141, "Cursor", 0xFF34434Cu, false);
@@ -170,8 +198,8 @@ static void draw_window(void) {
         fill_rect(track_x + marker - 5, track_y - 5, 11, 16,
                   preferences.accent_color);
     } else {
-        moswm_draw_file_icon(surface.pixels, surface.width, surface.height,
-            (int32_t)NAV_WIDTH + 26, 72, MOSWM_ICON_POINTER);
+        draw_cursor_icon((int32_t)surface.width - 52, 58, 2u,
+                         preferences.cursor_fill);
         for (uint32_t i = 0; i < 4; i++) {
             int32_t x = (int32_t)NAV_WIDTH + 22 + (int32_t)i * 37;
             fill_rect(x, 106, 25, 25, cursor_colors[i]);
@@ -187,6 +215,12 @@ static void draw_window(void) {
         else
             fill_rect((int32_t)NAV_WIDTH + 78, 215, 48, 3,
                       preferences.accent_color);
+        fill_rect((int32_t)NAV_WIDTH + 22, 234, 84, 28,
+                  preferences.cursor_pack == MOSDESK_CURSOR_PACK_POSY
+                      ? preferences.accent_color : 0xFFDCE2E6u);
+        fill_rect((int32_t)NAV_WIDTH + 116, 234, 84, 28,
+                  preferences.cursor_pack == MOSDESK_CURSOR_PACK_CLASSIC
+                      ? preferences.accent_color : 0xFFDCE2E6u);
     }
     draw_control_labels();
 }
@@ -219,6 +253,15 @@ static void handle_mouse(const syscall_window_event_t* event) {
         preferences.cursor_fill = cursor_colors[index];
     } else if (category == 2u && y >= 188 && y < 222) {
         preferences.cursor_scale = x < (int32_t)NAV_WIDTH + 74 ? 1u : 2u;
+    } else if (category == 2u && y >= 234 && y < 262) {
+        if (x >= (int32_t)NAV_WIDTH + 22 &&
+            x < (int32_t)NAV_WIDTH + 106)
+            preferences.cursor_pack = MOSDESK_CURSOR_PACK_POSY;
+        else if (x >= (int32_t)NAV_WIDTH + 116 &&
+                 x < (int32_t)NAV_WIDTH + 200)
+            preferences.cursor_pack = MOSDESK_CURSOR_PACK_CLASSIC;
+        else
+            return;
     } else {
         return;
     }

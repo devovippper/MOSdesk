@@ -6,5 +6,5 @@ arch=x86_64
 operatingsystem=MINIMALOS
 
 [Install.minimalos]
-copy=programs/mosWM/mosWM.run,programs/mosWM/assets/posy.cur,programs/mosWM/assets/NOTICE.txt,programs/mosWM/assets/fonts/Inter-Regular.otf,programs/mosWM/assets/fonts/Inter-Medium.otf,programs/mosWM/assets/fonts/Inter-LICENSE.txt,services/mosWM.service
+copy=programs/mosWM/mosWM.run,programs/mosWM/assets/cursors/Classic/arrow.cur,programs/mosWM/assets/cursors/Posy/arrow.cur,programs/mosWM/assets/cursors/Posy/alternate.cur,programs/mosWM/assets/cursors/Posy/busy.ani,programs/mosWM/assets/cursors/Posy/forbidden.cur,programs/mosWM/assets/cursors/Posy/hand.cur,programs/mosWM/assets/cursors/Posy/help.cur,programs/mosWM/assets/cursors/Posy/move.cur,programs/mosWM/assets/cursors/Posy/pen.cur,programs/mosWM/assets/cursors/Posy/precise.cur,programs/mosWM/assets/cursors/Posy/resize-ew.cur,programs/mosWM/assets/cursors/Posy/resize-nesw.cur,programs/mosWM/assets/cursors/Posy/resize-ns.cur,programs/mosWM/assets/cursors/Posy/resize-nwse.cur,programs/mosWM/assets/cursors/Posy/text.cur,programs/mosWM/assets/cursors/Posy/working.ani,programs/mosWM/assets/NOTICE.txt,programs/mosWM/assets/fonts/Inter-Regular.otf,programs/mosWM/assets/fonts/Inter-Medium.otf,programs/mosWM/assets/fonts/Inter-LICENSE.txt,services/mosWM.service
 target=0:/

@@ -16,6 +16,22 @@
 #define SYSCALL_WINDOW_EVENT_MINIMIZED 6u
 #define SYSCALL_WINDOW_EVENT_RESTORED 7u
 #define SYSCALL_WINDOW_EVENT_RESIZED 8u
+#define SYSCALL_CURSOR_ARROW 0u
+#define SYSCALL_CURSOR_BUSY 1u
+#define SYSCALL_CURSOR_WORKING 2u
+#define SYSCALL_CURSOR_TEXT 3u
+#define SYSCALL_CURSOR_HAND 4u
+#define SYSCALL_CURSOR_HELP 5u
+#define SYSCALL_CURSOR_FORBIDDEN 6u
+#define SYSCALL_CURSOR_MOVE 7u
+#define SYSCALL_CURSOR_RESIZE_EW 8u
+#define SYSCALL_CURSOR_RESIZE_NESW 9u
+#define SYSCALL_CURSOR_RESIZE_NS 10u
+#define SYSCALL_CURSOR_RESIZE_NWSE 11u
+#define SYSCALL_CURSOR_PRECISE 12u
+#define SYSCALL_CURSOR_PEN 13u
+#define SYSCALL_CURSOR_COUNT 14u
+#define SYSCALL_CURSOR_PACK_PATH_SIZE 128u
 #define SYSCALL_MOUSE_BTN_LEFT 1u
 #define SYSCALL_INPUT_BTN_LEFT 1u
 #define SYSCALL_INPUT_KEY_DOWN 1u
@@ -27,6 +43,7 @@ typedef struct { uint32_t title_bar, title_text, close_button, minimize_button, 
     close_icon, minimize_icon, maximize_icon, border, content_background; } syscall_window_style_t;
 typedef struct { uint32_t id, frame_version, flags; int32_t x, y; uint32_t width, height;
     char title[SYSCALL_WINDOW_MAX_TITLE]; syscall_window_style_t style; } syscall_window_info_t;
+typedef struct { uint32_t status; char pack[SYSCALL_CURSOR_PACK_PATH_SIZE]; } syscall_cursor_state_t;
 typedef struct { uint32_t width, height, pitch; uint32_t* pixels; } syscall_window_frame_t;
 typedef struct { uint32_t type; int32_t x, y, width, height; uint32_t buttons, key, mods, time_ms; int32_t wheel; } syscall_window_event_t;
 typedef struct { uint32_t type, buttons, key, mods, time_ms; int32_t dx, dy, wheel; } syscall_input_event_t;
@@ -48,4 +65,5 @@ uint64_t mos_window_set_style(uint32_t id, syscall_window_style_t s);
 uint64_t mos_window_next_event(uint32_t id, syscall_window_event_t* e);
 typedef syscall_window_info_t syscall_window_info_dummy_t;
 uint64_t mos_window_get_info(uint32_t id, syscall_window_info_t* i);
+uint64_t mos_window_get_cursor_state(syscall_cursor_state_t* state);
 uint64_t mos_window_present(uint32_t id, const uint32_t* px, uint32_t pitch, int32_t x, int32_t y, int32_t w, int32_t h);

@@ -25,6 +25,8 @@
 #define DRAG_NONE 0u
 #define DRAG_MOVE 1u
 #define DRAG_RESIZE 2u
+#define CURSOR_MAX_FRAMES 80u
+#define CURSOR_MAX_FILE_SIZE (8u * 1024u * 1024u)
 #define MODE_NORMAL 0u
 #define MODE_MAXIMIZED 1u
 #define MODE_FULLSCREEN 2u
@@ -52,12 +54,19 @@ static int32_t mouse_remainder_x;
 static int32_t mouse_remainder_y;
 static uint32_t focused_id;
 static uint32_t cursor_pixels[CURSOR_MAX_SIZE * CURSOR_MAX_SIZE];
+static uint32_t* cursor_animation_pixels;
+static uint32_t cursor_animation_frame_count;
+static uint32_t cursor_animation_frame_delay_ms;
+static uint64_t cursor_animation_elapsed_ms;
 static uint32_t cursor_width;
 static uint32_t cursor_height;
 static uint32_t cursor_hotspot_x;
 static uint32_t cursor_hotspot_y;
+static uint32_t cached_cursor_status = UINT32_MAX;
+static char cached_cursor_pack[SYSCALL_CURSOR_PACK_PATH_SIZE];
 static uint32_t cursor_fill_color = 0xFFFFFFFFu;
 static uint32_t cursor_scale = 1u;
+static uint32_t cursor_pack = MOSDESK_CURSOR_PACK_POSY;
 static uint32_t mouse_speed = 100u;
 static uint32_t accent_color = 0xFF3DAEE9u;
 static uint32_t dragging_id;
@@ -73,6 +82,8 @@ static bool start_menu_open;
 static char status_message[64];
 static bool screen_owned;
 static uint32_t settings_poll_frames;
+
+static uint8_t* wm_read_file(const char* path, size_t max_size, size_t* size);
 
 static void* wm_malloc(size_t size) {
     uint64_t result = mos_syscall3(SYS_HEAP, SYS_HEAP_ALLOC, 0, size);
@@ -93,6 +104,7 @@ static void load_desktop_settings(void) {
     accent_color = settings.accent_color;
     cursor_fill_color = settings.cursor_fill;
     cursor_scale = settings.cursor_scale;
+    cursor_pack = settings.cursor_pack;
 }
 
 static uint16_t read_u16le(const uint8_t* bytes) {
@@ -104,100 +116,280 @@ static uint32_t read_u32le(const uint8_t* bytes) {
            ((uint32_t)bytes[2] << 16u) | ((uint32_t)bytes[3] << 24u);
 }
 
-static bool load_cursor(void) {
-    const char* cursor_path = "0:/programs/mosWM/assets/posy.cur";
-    long fd = (long)mos_syscall3(SYS_OPEN,
-        (uint64_t)(uintptr_t)cursor_path, SYS_O_RDONLY, 0);
-    if (fd < 0) return false;
-    long file_size = (long)mos_syscall3(SYS_SIZE, (uint64_t)fd, 0, 0);
-    if (file_size < 22 || file_size > 1024 * 1024) {
-        mos_syscall3(SYS_CLOSE, (uint64_t)fd, 0, 0);
+static bool decode_cursor(const uint8_t* data, size_t size,
+                          uint32_t* pixels, uint32_t* width,
+                          uint32_t* height, uint32_t* hotspot_x,
+                          uint32_t* hotspot_y) {
+    if (size < 22u || read_u16le(data) != 0u ||
+        read_u16le(data + 2u) != 2u)
         return false;
-    }
-    uint8_t* data = (uint8_t*)wm_malloc((size_t)file_size);
-    if (!data) {
-        mos_syscall3(SYS_CLOSE, (uint64_t)fd, 0, 0);
-        return false;
-    }
-    size_t total = 0;
-    while (total < (size_t)file_size) {
-        long got = (long)mos_syscall3(SYS_READ, (uint64_t)fd,
-            (uint64_t)(uintptr_t)(data + total),
-            (uint64_t)((size_t)file_size - total));
-        if (got <= 0) break;
-        total += (size_t)got;
-    }
-    mos_syscall3(SYS_CLOSE, (uint64_t)fd, 0, 0);
-    if (total != (size_t)file_size || read_u16le(data) != 0u ||
-        read_u16le(data + 2) != 2u) {
-        wm_free(data);
-        return false;
-    }
+    uint16_t count = read_u16le(data + 4u);
+    if (!count || count > (size - 6u) / 16u) return false;
 
-    uint16_t count = read_u16le(data + 4);
     uint32_t best_offset = 0;
     uint32_t best_size = 0;
+    uint32_t best_width = 0;
+    uint32_t best_height = 0;
+    uint32_t best_hotspot_x = 0;
+    uint32_t best_hotspot_y = 0;
     uint32_t best_distance = UINT32_MAX;
     for (uint32_t i = 0; i < count; i++) {
         size_t entry_offset = 6u + (size_t)i * 16u;
-        if (entry_offset + 16u > total) break;
-        uint32_t width = data[entry_offset] ? data[entry_offset] : 256u;
-        uint32_t height = data[entry_offset + 1] ? data[entry_offset + 1] : 256u;
+        uint32_t image_width = data[entry_offset]
+            ? data[entry_offset] : 256u;
+        uint32_t image_height = data[entry_offset + 1u]
+            ? data[entry_offset + 1u] : 256u;
         uint32_t resource_size = read_u32le(data + entry_offset + 8u);
         uint32_t image_offset = read_u32le(data + entry_offset + 12u);
-        if (image_offset > total || resource_size > total - image_offset ||
+        if (!image_width || !image_height ||
+            image_width > CURSOR_MAX_SIZE ||
+            image_height > CURSOR_MAX_SIZE ||
+            image_offset > size || resource_size > size - image_offset ||
             resource_size < 40u)
             continue;
-        uint32_t distance = width > CURSOR_MAX_SIZE
-            ? width - CURSOR_MAX_SIZE : CURSOR_MAX_SIZE - width;
-        if (height > CURSOR_MAX_SIZE) distance += height - CURSOR_MAX_SIZE;
-        else distance += CURSOR_MAX_SIZE - height;
+        uint32_t distance = CURSOR_MAX_SIZE - image_width +
+                            CURSOR_MAX_SIZE - image_height;
         if (distance < best_distance) {
             best_distance = distance;
             best_offset = image_offset;
             best_size = resource_size;
-            cursor_width = width;
-            cursor_height = height;
-            cursor_hotspot_x = read_u16le(data + entry_offset + 4u);
-            cursor_hotspot_y = read_u16le(data + entry_offset + 6u);
+            best_width = image_width;
+            best_height = image_height;
+            best_hotspot_x = read_u16le(data + entry_offset + 4u);
+            best_hotspot_y = read_u16le(data + entry_offset + 6u);
         }
     }
+    if (!best_offset) return false;
 
-    bool loaded = false;
-    if (best_offset && cursor_width <= CURSOR_MAX_SIZE &&
-        cursor_height <= CURSOR_MAX_SIZE && best_size >= 40u) {
-        const uint8_t* dib = data + best_offset;
-        uint32_t header_size = read_u32le(dib);
-        int32_t dib_width = (int32_t)read_u32le(dib + 4u);
-        int32_t dib_height = (int32_t)read_u32le(dib + 8u);
-        uint16_t bits_per_pixel = read_u16le(dib + 14u);
-        uint32_t compression = read_u32le(dib + 16u);
-        size_t pixel_offset = header_size;
-        size_t pixel_bytes = (size_t)cursor_width * cursor_height * 4u;
-        if (header_size >= 40u && dib_width == (int32_t)cursor_width &&
-            dib_height == (int32_t)(cursor_height * 2u) &&
-            bits_per_pixel == 32u && compression == 0u &&
-            pixel_offset <= best_size && pixel_bytes <= best_size - pixel_offset) {
-            const uint8_t* source = dib + pixel_offset;
-            for (uint32_t y = 0; y < cursor_height; y++) {
-                uint32_t source_y = cursor_height - 1u - y;
-                for (uint32_t x = 0; x < cursor_width; x++) {
-                    size_t source_index =
-                        ((size_t)source_y * cursor_width + x) * 4u;
-                    uint8_t blue = source[source_index];
-                    uint8_t green = source[source_index + 1u];
-                    uint8_t red = source[source_index + 2u];
-                    uint8_t alpha = source[source_index + 3u];
-                    cursor_pixels[(size_t)y * CURSOR_MAX_SIZE + x] =
-                        ((uint32_t)alpha << 24u) | ((uint32_t)red << 16u) |
-                        ((uint32_t)green << 8u) | blue;
-                }
-            }
-            loaded = true;
+    const uint8_t* dib = data + best_offset;
+    uint32_t header_size = read_u32le(dib);
+    int32_t dib_width = (int32_t)read_u32le(dib + 4u);
+    int32_t dib_height = (int32_t)read_u32le(dib + 8u);
+    uint16_t bits_per_pixel = read_u16le(dib + 14u);
+    uint32_t compression = read_u32le(dib + 16u);
+    size_t pixel_bytes = (size_t)best_width * best_height * 4u;
+    if (header_size < 40u || dib_width != (int32_t)best_width ||
+        dib_height != (int32_t)(best_height * 2u) ||
+        bits_per_pixel != 32u || compression != 0u ||
+        header_size > best_size || pixel_bytes > best_size - header_size)
+        return false;
+
+    memset(pixels, 0, CURSOR_MAX_SIZE * CURSOR_MAX_SIZE * sizeof(uint32_t));
+    const uint8_t* source = dib + header_size;
+    for (uint32_t y = 0; y < best_height; y++) {
+        uint32_t source_y = best_height - 1u - y;
+        for (uint32_t x = 0; x < best_width; x++) {
+            size_t source_index =
+                ((size_t)source_y * best_width + x) * 4u;
+            uint8_t blue = source[source_index];
+            uint8_t green = source[source_index + 1u];
+            uint8_t red = source[source_index + 2u];
+            uint8_t alpha = source[source_index + 3u];
+            pixels[(size_t)y * CURSOR_MAX_SIZE + x] =
+                ((uint32_t)alpha << 24u) | ((uint32_t)red << 16u) |
+                ((uint32_t)green << 8u) | blue;
         }
+    }
+    *width = best_width;
+    *height = best_height;
+    *hotspot_x = best_hotspot_x < best_width ? best_hotspot_x : 0u;
+    *hotspot_y = best_hotspot_y < best_height ? best_hotspot_y : 0u;
+    return true;
+}
+
+static bool decode_animated_cursor(const uint8_t* data, size_t size) {
+    if (size < 20u || memcmp(data, "RIFF", 4u) ||
+        memcmp(data + 8u, "ACON", 4u))
+        return false;
+    uint32_t riff_size = read_u32le(data + 4u);
+    if (riff_size > size - 8u) return false;
+    size_t riff_end = 8u + riff_size;
+    uint32_t declared_frames = 0;
+    uint32_t frame_delay = 6u;
+    size_t frames_start = 0;
+    size_t frames_end = 0;
+    for (size_t offset = 12u; offset + 8u <= riff_end;) {
+        const uint8_t* chunk = data + offset;
+        uint32_t chunk_size = read_u32le(chunk + 4u);
+        size_t chunk_data = offset + 8u;
+        if (chunk_size > riff_end - chunk_data) return false;
+        if (!memcmp(chunk, "anih", 4u)) {
+            if (chunk_size < 36u) return false;
+            declared_frames = read_u32le(data + chunk_data + 4u);
+            uint32_t rate = read_u32le(data + chunk_data + 28u);
+            if (rate)
+                frame_delay = rate > UINT32_MAX / 10u
+                    ? UINT32_MAX : rate * 10u;
+        } else if (!memcmp(chunk, "LIST", 4u) && chunk_size >= 4u &&
+                   !memcmp(data + chunk_data, "fram", 4u)) {
+            frames_start = chunk_data + 4u;
+            frames_end = chunk_data + chunk_size;
+        }
+        offset = chunk_data + chunk_size + (chunk_size & 1u);
+    }
+    if (!declared_frames || declared_frames > CURSOR_MAX_FRAMES ||
+        !frames_start || frames_end < frames_start)
+        return false;
+    uint32_t* frames = wm_malloc((size_t)declared_frames *
+        CURSOR_MAX_SIZE * CURSOR_MAX_SIZE * sizeof(uint32_t));
+    if (!frames) return false;
+    memset(frames, 0, (size_t)declared_frames * CURSOR_MAX_SIZE *
+           CURSOR_MAX_SIZE * sizeof(uint32_t));
+
+    uint32_t loaded_frames = 0;
+    uint32_t frame_width = 0;
+    uint32_t frame_height = 0;
+    uint32_t hotspot_x = 0;
+    uint32_t hotspot_y = 0;
+    for (size_t offset = frames_start; offset + 8u <= frames_end;) {
+        const uint8_t* chunk = data + offset;
+        uint32_t chunk_size = read_u32le(chunk + 4u);
+        size_t chunk_data = offset + 8u;
+        if (chunk_size > frames_end - chunk_data) {
+            wm_free(frames);
+            return false;
+        }
+        if (!memcmp(chunk, "icon", 4u)) {
+            if (loaded_frames >= declared_frames) {
+                wm_free(frames);
+                return false;
+            }
+            uint32_t width, height, hot_x, hot_y;
+            uint32_t* target = frames + (size_t)loaded_frames *
+                CURSOR_MAX_SIZE * CURSOR_MAX_SIZE;
+            if (!decode_cursor(data + chunk_data, chunk_size, target,
+                    &width, &height, &hot_x, &hot_y) ||
+                (loaded_frames && (width != frame_width ||
+                                   height != frame_height ||
+                                   hot_x != hotspot_x || hot_y != hotspot_y))) {
+                wm_free(frames);
+                return false;
+            }
+            frame_width = width;
+            frame_height = height;
+            hotspot_x = hot_x;
+            hotspot_y = hot_y;
+            loaded_frames++;
+        }
+        offset = chunk_data + chunk_size + (chunk_size & 1u);
+    }
+    if (loaded_frames != declared_frames) {
+        wm_free(frames);
+        return false;
+    }
+    cursor_animation_pixels = frames;
+    cursor_animation_frame_count = loaded_frames;
+    cursor_animation_frame_delay_ms = frame_delay ? frame_delay : 60u;
+    cursor_width = frame_width;
+    cursor_height = frame_height;
+    cursor_hotspot_x = hotspot_x;
+    cursor_hotspot_y = hotspot_y;
+    cursor_animation_elapsed_ms = 0;
+    return true;
+}
+
+static bool path_has_suffix(const char* path, const char* suffix) {
+    size_t path_length = strlen(path);
+    size_t suffix_length = strlen(suffix);
+    return path_length >= suffix_length &&
+        !strcmp(path + path_length - suffix_length, suffix);
+}
+
+static bool load_cursor_resource(const char* path) {
+    wm_free(cursor_animation_pixels);
+    cursor_animation_pixels = NULL;
+    cursor_animation_frame_count = 0;
+    cursor_width = 0;
+    cursor_height = 0;
+    cursor_hotspot_x = 0;
+    cursor_hotspot_y = 0;
+    size_t size = 0;
+    uint8_t* data = wm_read_file(path, CURSOR_MAX_FILE_SIZE, &size);
+    if (!data) return false;
+    bool loaded;
+    if (path_has_suffix(path, ".ani")) {
+        loaded = decode_animated_cursor(data, size);
+    } else {
+        loaded = decode_cursor(data, size, cursor_pixels, &cursor_width,
+            &cursor_height, &cursor_hotspot_x, &cursor_hotspot_y);
     }
     wm_free(data);
     return loaded;
+}
+
+static bool join_cursor_path(char* output, size_t capacity,
+                             const char* pack_path, const char* filename) {
+    size_t used = 0;
+    while (pack_path[used] && used + 1u < capacity) {
+        output[used] = pack_path[used];
+        used++;
+    }
+    if (pack_path[used]) return false;
+    if (!used || output[used - 1u] != '/') {
+        if (used + 1u >= capacity) return false;
+        output[used++] = '/';
+    }
+    for (size_t i = 0; filename[i]; i++) {
+        if (used + 1u >= capacity) return false;
+        output[used++] = filename[i];
+    }
+    output[used] = '\0';
+    return true;
+}
+
+static const char* cursor_filename(uint32_t status) {
+    static const char* const filenames[SYSCALL_CURSOR_COUNT] = {
+        "arrow.cur", "busy.ani", "working.ani", "text.cur",
+        "hand.cur", "help.cur", "forbidden.cur", "move.cur",
+        "resize-ew.cur", "resize-nesw.cur", "resize-ns.cur",
+        "resize-nwse.cur", "precise.cur", "pen.cur"
+    };
+    return status < SYSCALL_CURSOR_COUNT ? filenames[status] : filenames[0];
+}
+
+static bool try_cursor_from_pack(const char* pack_path, uint32_t status) {
+    char path[SYSCALL_CURSOR_PACK_PATH_SIZE + 32u];
+    if (join_cursor_path(path, sizeof(path), pack_path,
+                         cursor_filename(status)) &&
+        load_cursor_resource(path))
+        return true;
+    if (status && join_cursor_path(path, sizeof(path), pack_path,
+                                   "arrow.cur") &&
+        load_cursor_resource(path))
+        return true;
+    return false;
+}
+
+static const char* default_cursor_pack(void) {
+    return cursor_pack == MOSDESK_CURSOR_PACK_CLASSIC
+        ? "0:/programs/mosWM/assets/cursors/Classic"
+        : "0:/programs/mosWM/assets/cursors/Posy";
+}
+
+static void ensure_cursor_loaded(const syscall_cursor_state_t* cursor_state,
+                                 uint32_t status) {
+    const char* system_pack = default_cursor_pack();
+    const char* requested_pack = cursor_state && cursor_state->pack[0]
+        ? cursor_state->pack : system_pack;
+    if (status >= SYSCALL_CURSOR_COUNT) status = SYSCALL_CURSOR_ARROW;
+    if (cached_cursor_status == status &&
+        !strcmp(cached_cursor_pack, requested_pack))
+        return;
+
+    bool loaded = try_cursor_from_pack(requested_pack, status);
+    if (!loaded && strcmp(requested_pack, system_pack)) {
+        strcpy(status_message, "Cursor pack could not be loaded");
+        loaded = try_cursor_from_pack(system_pack, status);
+    }
+    if (!loaded && status != SYSCALL_CURSOR_ARROW)
+        loaded = try_cursor_from_pack(system_pack, SYSCALL_CURSOR_ARROW);
+    if (!loaded) {
+        cursor_width = 0;
+        cursor_height = 0;
+        strcpy(status_message, "Cursor resource could not be loaded");
+    }
+    strcpy(cached_cursor_pack, requested_pack);
+    cached_cursor_status = status;
 }
 
 /* Reads a whole file into a wm_malloc'd buffer (caller wm_free()s it). */
@@ -750,6 +942,11 @@ static void composite_window(const syscall_window_info_t* info,
     fill_rounded_rect(x + 1, y + 1, outer_width - 2,
                       (int32_t)TITLE_HEIGHT, CORNER_RADIUS - 1u,
                       info->style.title_bar);
+    fill_rect(x + 1,
+              y + 1 + (int32_t)TITLE_HEIGHT -
+                  (int32_t)(CORNER_RADIUS - 1u),
+              outer_width - 2, (int32_t)(CORNER_RADIUS - 1u),
+              info->style.title_bar);
     fill_rect(x + 1, y + (int32_t)TITLE_HEIGHT - 1, outer_width - 2, 1,
               0x30000000u);
     fill_rect(x + (int32_t)CORNER_RADIUS, y + 1,
@@ -843,6 +1040,7 @@ static void draw_cursor(void) {
         };
         cursor_width = 12;
         cursor_height = 12;
+        memset(cursor_pixels, 0, sizeof(cursor_pixels));
         for (uint32_t y = 0; y < cursor_height; y++) {
             for (uint32_t x = 0; x < cursor_width; x++) {
                 char pixel = fallback[y][x];
@@ -853,11 +1051,18 @@ static void draw_cursor(void) {
             }
         }
     }
+    const uint32_t* pixels = cursor_animation_pixels
+        ? cursor_animation_pixels +
+            (size_t)((cursor_animation_elapsed_ms /
+                      cursor_animation_frame_delay_ms) %
+                     cursor_animation_frame_count) *
+                CURSOR_MAX_SIZE * CURSOR_MAX_SIZE
+        : cursor_pixels;
     int32_t origin_x = cursor_x - (int32_t)(cursor_hotspot_x * cursor_scale);
     int32_t origin_y = cursor_y - (int32_t)(cursor_hotspot_y * cursor_scale);
     for (uint32_t y = 0; y < cursor_height; y++) {
         for (uint32_t x = 0; x < cursor_width; x++) {
-            uint32_t color = cursor_pixels[y * CURSOR_MAX_SIZE + x];
+            uint32_t color = pixels[y * CURSOR_MAX_SIZE + x];
             if (!(color >> 24u)) continue;
             if (((color >> 16u) & 255u) > 210u &&
                 ((color >> 8u) & 255u) > 210u && (color & 255u) > 210u)
@@ -1022,6 +1227,7 @@ static void render(const syscall_window_info_t* windows, uint64_t count) {
         }
     }
     draw_taskbar(windows, count);
+    cursor_animation_elapsed_ms = mos_syscall1(SYS_UPTIME, 0);
     draw_cursor();
     if (mos_graphics_blit_surface(canvas, display.width, display.height,
             display.width * sizeof(uint32_t), 0, 0,
@@ -1054,6 +1260,44 @@ static syscall_window_info_t* window_at(syscall_window_info_t* windows,
         }
     }
     return NULL;
+}
+
+static void update_cursor_appearance(syscall_window_info_t* windows,
+                                     uint64_t count) {
+    syscall_window_info_t* under =
+        window_at(windows, count, cursor_x, cursor_y);
+    syscall_window_info_t* app_window =
+        under && under->id == focused_id ? under : NULL;
+    syscall_cursor_state_t cursor_state = {0};
+    if (mos_window_get_cursor_state(&cursor_state) != SYS_SUCCESS)
+        strcpy(status_message, "Unable to read cursor state");
+    uint32_t status = SYSCALL_CURSOR_ARROW;
+
+    if (dragging_id) {
+        status = drag_mode == DRAG_RESIZE
+            ? SYSCALL_CURSOR_RESIZE_NWSE : SYSCALL_CURSOR_MOVE;
+        app_window = NULL;
+    } else if (under) {
+        int32_t x = cursor_x - (int32_t)under->x;
+        int32_t y = cursor_y - (int32_t)under->y;
+        int32_t right = (int32_t)under->width + 1;
+        if (y < (int32_t)TITLE_HEIGHT) {
+            if (x >= right - 72) status = SYSCALL_CURSOR_HAND;
+            else status = SYSCALL_CURSOR_MOVE;
+            app_window = NULL;
+        } else if ((under->flags & SYSCALL_WINDOW_RESIZABLE) &&
+                   x >= right - 14 &&
+                   y >= (int32_t)under->height +
+                            (int32_t)TITLE_HEIGHT - 14) {
+            status = SYSCALL_CURSOR_RESIZE_NWSE;
+            app_window = NULL;
+        } else if (!app_window) {
+            status = SYSCALL_CURSOR_ARROW;
+        } else {
+            status = cursor_state.status;
+        }
+    }
+    ensure_cursor_loaded(app_window ? &cursor_state : NULL, status);
 }
 
 static void focus_window(syscall_window_info_t* info) {
@@ -1369,6 +1613,8 @@ static void cleanup(void) {
     font_regular_data = NULL;
     wm_free(font_medium_data);
     font_medium_data = NULL;
+    wm_free(cursor_animation_pixels);
+    cursor_animation_pixels = NULL;
     for (uint32_t i = 0; i < MAX_WINDOWS; i++) {
         wm_free(cache[i].pixels);
         memset(&cache[i], 0, sizeof(cache[i]));
@@ -1414,7 +1660,6 @@ int main(void) {
     cursor_x = (int32_t)(display.width / 2u);
     cursor_y = (int32_t)(display.height / 2u);
     load_desktop_settings();
-    load_cursor();
     load_fonts();
     syscall_window_info_t windows[MAX_WINDOWS];
     syscall_input_event_t input[32];
@@ -1447,6 +1692,7 @@ int main(void) {
         } else if (event_count != SYS_ERR_AGAIN) {
             strcpy(status_message, "Input read failed");
         }
+        update_cursor_appearance(windows, count);
         render(windows, count);
         mos_sleep(16);
     }

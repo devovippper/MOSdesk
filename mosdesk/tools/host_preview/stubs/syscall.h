@@ -13,6 +13,7 @@
 #define SYS_SEEK 14u
 #define SYS_FWRITE 15u
 #define SYS_GETTIME 16u
+#define SYS_UPTIME 4u
 #define SYS_HEAP 17u
 #define SYS_O_RDONLY 0u
 uint64_t mos_syscall(uint64_t n, uint64_t a, uint64_t b, uint64_t c);

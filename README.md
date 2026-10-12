@@ -71,8 +71,8 @@ This produces `mosWM/dist/mosWM.run` and the installable
 cursor, and `mosWM.service` module definition in the OS. The service starts the
 desktop after the boot disk is mounted. MOSdesk Settings is opened from the
 Start menu and saves desktop preferences for future sessions. Its default
-pointer resource is the user-supplied Posy cursor; attribution is included in
-the package.
+pointer is the Posy cursor pack; the previous single-pointer cursor is
+available as Classic. Attribution is included in the package.
 
 The standalone manager can also be started manually from the Minimal-OS
 terminal:

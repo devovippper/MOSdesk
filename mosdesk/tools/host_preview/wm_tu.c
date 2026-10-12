@@ -13,7 +13,7 @@ uint32_t* wm_frame(int menu_open, int cx, int cy, const char* status) {
     wallpaper = wm_malloc((size_t)display.width * display.height * 4);
     paint_wallpaper(wallpaper);
     cursor_x = cx; cursor_y = cy;
-    load_desktop_settings(); load_cursor(); load_fonts();
+    load_desktop_settings(); load_fonts();
     start_menu_open = menu_open != 0;
     if (status) strcpy(status_message, status);
     syscall_window_info_t windows[MAX_WINDOWS];
@@ -24,6 +24,7 @@ uint32_t* wm_frame(int menu_open, int cx, int cy, const char* status) {
         if (windows[i].flags & SYSCALL_WINDOW_FOCUSED) focused_id = windows[i].id;
         if (e) refresh_frame(e, &windows[i]);
     }
+    update_cursor_appearance(windows, count);
     render(windows, count);
     return harness_fb;
 }

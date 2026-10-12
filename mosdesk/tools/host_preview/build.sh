@@ -14,9 +14,15 @@ for f in wm_tu settings_tu sdk_impl driver; do gcc $CF -c "$HERE/$f.c" -o "$WORK
 gcc $CF -c "$ROOT/mosdesk/libraries/ttrend/src/ttrend.c" -o "$WORK/ttrend.o"
 gcc "$WORK"/*.o -o "$WORK/harness"
 render() { # name, fonts(1/0)
-  S="$WORK/$1"; mkdir -p "$S/0:/programs/mosdesk/fonts" "$S/0:/programs/mosWM/assets/fonts"
+  S="$WORK/$1"; mkdir -p "$S/0:/programs/mosdesk/fonts" \
+    "$S/0:/programs/mosWM/assets/fonts" \
+    "$S/0:/programs/mosWM/assets/cursors/Posy" \
+    "$S/0:/programs/mosWM/assets/cursors/Classic"
   cp "$ROOT/mosdesk/fonts/default.font" "$S/0:/programs/mosdesk/fonts/"
-  cp "$ROOT/mosWM/assets/posy.cur" "$S/0:/programs/mosWM/assets/"
+  cp "$ROOT/mosWM/assets/cursors/Posy/arrow.cur" \
+    "$S/0:/programs/mosWM/assets/cursors/Posy/"
+  cp "$ROOT/mosWM/assets/cursors/Classic/arrow.cur" \
+    "$S/0:/programs/mosWM/assets/cursors/Classic/"
   if [ "$2" = 1 ]; then
     cp "$ROOT"/mosdesk/fonts/*.otf "$S/0:/programs/mosdesk/fonts/"
     cp "$ROOT"/mosdesk/fonts/*.otf "$S/0:/programs/mosWM/assets/fonts/"

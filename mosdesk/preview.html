@@ -14,10 +14,11 @@
       color: #e8eef2;
       --accent: #55a8dc;
       --cursor-fill: #fff;
+      --cursor-image: url("../mosWM/assets/cursors/Posy/arrow.cur");
       --panel: #171f28;
       --panel-edge: #44525d;
       --scale: 1;
-      cursor: url("../mosWM/assets/posy.cur") 0 0, default;
+      cursor: var(--cursor-image) 0 0, default;
     }
     * { box-sizing: border-box; }
     body { height: 100dvh; min-height: 420px; margin: 0; overflow: hidden; }
@@ -181,7 +182,7 @@
     .size-options { display: flex; gap: 6px; }
     .size-button { min-width: 62px; height: 30px; border: 1px solid #aeb9c0; background: #e2e7ea; color: #3a4851; cursor: inherit; }
     .size-button[aria-pressed="true"] { border-color: #668ba3; background: #d2e4f0; }
-    .cursor-sample { position: relative; width: 42px; height: 42px; background: #193750; cursor: url("../mosWM/assets/posy.cur") 0 0, default; }
+    .cursor-sample { position: relative; width: 42px; height: 42px; background: #193750; cursor: inherit; }
     .cursor-sample::after { position: absolute; content: ""; left: 8px; top: 5px; width: 24px; height: 31px; background: var(--cursor-fill); clip-path: polygon(0 0, 0 100%, 29% 77%, 47% 100%, 61% 94%, 43% 70%, 76% 68%); transform: scale(var(--scale)); transform-origin: top left; filter: drop-shadow(1px 1px 1px #000); }
     .preview-note { position: absolute; right: 10px; top: 8px; color: #d2dce2; font-size: 10px; opacity: .75; }
     [hidden] { display: none !important; }
@@ -257,6 +258,7 @@
               <button class="swatch" style="background:#55d6be" data-cursor="#55d6be" aria-label="Mint cursor" aria-pressed="false"></button>
             </div></div>
             <div class="setting-row"><span>Size</span><div class="size-options"><button class="size-button" data-size="1" aria-pressed="true">100%</button><button class="size-button" data-size="2" aria-pressed="false">200%</button></div></div>
+            <div class="setting-row"><span>Cursor pack</span><div class="size-options"><button class="size-button" data-pack="posy" aria-pressed="true">Posy</button><button class="size-button" data-pack="classic" aria-pressed="false">Classic</button></div></div>
           </section>
         </div>
       </div>
@@ -316,6 +318,16 @@
       button.addEventListener("click", () => {
         document.documentElement.style.setProperty("--scale", button.dataset.size);
         document.querySelectorAll("[data-size]").forEach(option => option.setAttribute("aria-pressed", String(option === button)));
+      });
+    });
+    document.querySelectorAll("[data-pack]").forEach(button => {
+      button.addEventListener("click", () => {
+        const pack = button.dataset.pack;
+        const cursor = pack === "classic"
+          ? 'url("../mosWM/assets/cursors/Classic/arrow.cur")'
+          : 'url("../mosWM/assets/cursors/Posy/arrow.cur")';
+        document.documentElement.style.setProperty("--cursor-image", cursor);
+        document.querySelectorAll("[data-pack]").forEach(option => option.setAttribute("aria-pressed", String(option === button)));
       });
     });
     document.querySelector("#speed").addEventListener("input", event => {

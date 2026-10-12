@@ -31,8 +31,11 @@ MOSdesk is hosted by mosWM. The installed mosWM service owns the framebuffer,
 draws the desktop and taskbar, and provides MOSdesk Settings from the start
 menu. Do not launch the legacy standalone framebuffer build alongside mosWM.
 
-The default pointer is the user-supplied Posy cursor resource. Its fill color,
-scale, pointer speed, and desktop accent can be adjusted in MOSdesk Settings.
+The Posy cursor pack is the default; the previous single-pointer cursor is
+available as the Classic pack. MOSdesk Settings lets users choose the pack,
+fill color, scale, pointer speed, and desktop accent. Posy's animated busy and
+working cursors and its text, hand, help, forbidden, move, pen, precise, and
+resize cursors are loaded as needed.
 
 ## Window features
 
@@ -54,6 +57,21 @@ Applications render ARGB8888 pixels into their own buffer and publish updates
 through the window API. The kernel copies those pixels into the corresponding
 window surface; applications never receive another application's surface
 pointer.
+
+The focused window's owner may change the global pointer shape or cursor pack.
+The kernel rejects cursor requests from unfocused windows and processes other
+than the focused window's owner. Cursor pack paths must be under
+`0:/programs/`; a pack directory contains `arrow.cur` and may provide
+`busy.ani`, `working.ani`, `text.cur`, `hand.cur`, `help.cur`, `forbidden.cur`,
+`move.cur`, `resize-ew.cur`, `resize-nesw.cur`, `resize-ns.cur`,
+`resize-nwse.cur`, `precise.cur`, and `pen.cur`. Missing shapes fall back to
+the pack's arrow cursor.
+
+```c
+mos_window_set_cursor_pack(window_id,
+    "0:/programs/example/assets/cursors/Brand");
+mos_window_set_cursor(window_id, SYSCALL_CURSOR_BUSY);
+```
 
 ## Application API
 
