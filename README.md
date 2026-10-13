@@ -4,6 +4,10 @@ MOSdesk is a user-space desktop environment for [Minimal-OS](https://github.com/
 
 The project is split into a desktop implementation, the Minimal-OS SDK toolchain, and the underlying OS sources used to build and package the system.
 
+
+https://github.com/user-attachments/assets/bddd45a1-8dfb-4670-86b6-80896696b8b8
+
+
 ## Features
 
 - Composites desktop layers and window surfaces with dirty-rectangle updates
