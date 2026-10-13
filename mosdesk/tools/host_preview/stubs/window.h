@@ -67,3 +67,6 @@ typedef syscall_window_info_t syscall_window_info_dummy_t;
 uint64_t mos_window_get_info(uint32_t id, syscall_window_info_t* i);
 uint64_t mos_window_get_cursor_state(syscall_cursor_state_t* state);
 uint64_t mos_window_present(uint32_t id, const uint32_t* px, uint32_t pitch, int32_t x, int32_t y, int32_t w, int32_t h);
+#define SYSCALL_WINDOW_ICON_SIZE 64u
+#define SYSCALL_WINDOW_ICON_PIXELS (SYSCALL_WINDOW_ICON_SIZE * SYSCALL_WINDOW_ICON_SIZE)
+uint64_t mos_window_get_icon(uint32_t id, uint32_t* pixels);

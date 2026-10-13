@@ -9,7 +9,7 @@ OUT=${1:-$ROOT/preview-out}
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 CF="-std=gnu17 -O1 -Wall -Wno-unused-function -iquote $HERE/stubs -I$ROOT -I$ROOT/mosdesk/libraries/ttrend/include"
-for f in wm_tu settings_tu sdk_impl driver; do gcc $CF -c "$HERE/$f.c" -o "$WORK/$f.o"; done
+for f in wm_tu settings_tu sdk_impl pwhash_stub driver; do gcc $CF -c "$HERE/$f.c" -o "$WORK/$f.o"; done
 gcc $CF -c "$ROOT/mosdesk/libraries/ttrend/src/ttrend.c" -o "$WORK/ttrend.o"
 gcc "$WORK"/*.o -o "$WORK/harness"
 S="$WORK/sandbox"

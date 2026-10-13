@@ -71,6 +71,18 @@ Builds the real mosWM cursor loader on the host and writes
 (real compositor frames), `posy_cursor_animated.gif` (busy / working) and
 `posy_cursor_source_128.png` (the 128 px source art). Needs gcc and Pillow.
 
+## Scripted desktop session (images + mp4/gif)
+
+```sh
+./mosdesk/tools/host_preview/anim.sh [outdir]
+```
+
+Drives the real mosWM compositor and Settings client with scripted keyboard and
+mouse input (first-run and sign-in screens, desktop, start menu, Settings theme
+change, window drag/maximize) and writes PNG stills plus `mosdesk_demo.mp4` and
+`.gif` (ffmpeg needed for the video). The host stubs use a stand-in password hash
+because the real one needs the Minimal-OS-SDK submodule.
+
 ## Preview MOSdesk
 
 To view the desktop layout in a browser without building or booting Minimal-OS:

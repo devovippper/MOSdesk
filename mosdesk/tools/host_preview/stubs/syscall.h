@@ -19,3 +19,14 @@
 uint64_t mos_syscall(uint64_t n, uint64_t a, uint64_t b, uint64_t c);
 uint64_t mos_syscall1(uint64_t n, uint64_t a);
 uint64_t mos_syscall3(uint64_t n, uint64_t a, uint64_t b, uint64_t c);
+/* --- additions: newer syscalls used by current mosWM --- */
+#define SYS_ERR_NOTFOUND ((uint64_t)-4)
+#define SYS_RANDOM 90u
+#define SYS_USB 91u
+#define SYS_USB_KEY_TO_ASCII 1u
+#define SYS_LISTDIR 92u
+#define SYS_EXEC 33u
+#define SYSCALL_DIRENT_TYPE_FILE 1u
+#define SYSCALL_DIRENT_TYPE_DIR 2u
+#define SYSCALL_DIRENT_TYPE_EXECUTABLE 3u
+typedef struct { char name[64]; uint32_t type; uint32_t hidden; } syscall_dirent_t;
