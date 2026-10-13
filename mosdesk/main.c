@@ -161,7 +161,7 @@ static void draw_control_labels(void) {
         draw_text((int32_t)NAV_WIDTH + 139, 243, "Classic",
                   preferences.cursor_pack == MOSDESK_CURSOR_PACK_CLASSIC
                       ? 0xFFFFFFFFu : 0xFF34434Cu, false);
-    } else {
+    } else if (category == 3u) {
         draw_text((int32_t)NAV_WIDTH + 22, 63, "Password sign-in",
                   0xFF34434Cu, true);
         if (password_editing) {
@@ -179,6 +179,12 @@ static void draw_control_labels(void) {
                       "The desktop opens automatically.",
                       0xFF667680u, false);
         }
+    } else {
+        draw_text((int32_t)NAV_WIDTH + 22, 63, "Click once to open / run",
+                  0xFF34434Cu, true);
+        draw_text((int32_t)NAV_WIDTH + 22, 161,
+                  "Off uses double-click to open / run.",
+                  0xFF667680u, false);
     }
 }
 
@@ -198,12 +204,12 @@ static void draw_window(void) {
               1, 0xFFD2D9DEu);
 
     draw_text(16, 15, "MOSdesk Settings", 0xFF273640u, true);
-    static const moswm_file_icon_t nav_icons[4] = {
+    static const moswm_file_icon_t nav_icons[5] = {
         MOSWM_ICON_APPEARANCE, MOSWM_ICON_MOUSE,
-        MOSWM_ICON_POINTER, MOSWM_ICON_SETTINGS};
-    static const char* const nav_names[4] = {
-        "Appearance", "Mouse", "Cursor", "Login"};
-    for (int32_t i = 0; i < 4; i++) {
+        MOSWM_ICON_POINTER, MOSWM_ICON_SETTINGS, MOSWM_ICON_HOME};
+    static const char* const nav_names[5] = {
+        "Appearance", "Mouse", "Cursor", "Login", "Desktop"};
+    for (int32_t i = 0; i < 5; i++) {
         int32_t row = NAV_TOP + i * NAV_PITCH;
         moswm_draw_file_icon_sized(surface.pixels, surface.width,
                                    surface.height, 18, row + 3,
@@ -262,7 +268,7 @@ static void draw_window(void) {
         fill_rect((int32_t)NAV_WIDTH + 116, 234, 84, 28,
                   preferences.cursor_pack == MOSDESK_CURSOR_PACK_CLASSIC
                       ? preferences.accent_color : 0xFFDCE2E6u);
-    } else {
+    } else if (category == 3u) {
         if (password_editing) {
             fill_rect((int32_t)NAV_WIDTH + 22, 106,
                       (int32_t)surface.width - (int32_t)NAV_WIDTH - 44,
@@ -288,6 +294,10 @@ static void draw_window(void) {
             fill_rect((int32_t)NAV_WIDTH + 22, 106, 160, 34,
                       preferences.accent_color);
         }
+    } else {
+        fill_rect((int32_t)NAV_WIDTH + 22, 106, 160, 34,
+                  preferences.click_once_open
+                      ? preferences.accent_color : 0xFFDCE2E6u);
     }
     draw_control_labels();
     if (category == 3u && !password_editing) {
@@ -298,6 +308,11 @@ static void draw_window(void) {
         if (preferences.login_enabled)
             draw_text((int32_t)NAV_WIDTH + 48, 162, "Disable password",
                       0xFF34434Cu, false);
+    } else if (category == 4u) {
+        draw_text((int32_t)NAV_WIDTH + 33, 117,
+                  preferences.click_once_open ? "On" : "Off",
+                  preferences.click_once_open ? 0xFFFFFFFFu : 0xFF34434Cu,
+                  false);
     }
     if (settings_message[0])
         draw_text((int32_t)NAV_WIDTH + 22,
@@ -352,7 +367,7 @@ static void handle_mouse(const syscall_window_event_t* event) {
     int32_t y = event->y;
     if (x < (int32_t)NAV_WIDTH) {
         int32_t row = (y - NAV_TOP) / NAV_PITCH;
-        if (y < NAV_TOP || row < 0 || row > 3) return;
+        if (y < NAV_TOP || row < 0 || row > 4) return;
         category = (uint32_t)row;
         settings_message[0] = '\0';
     } else if (category == 0u && y >= 92 && y < 132) {
@@ -405,6 +420,10 @@ static void handle_mouse(const syscall_window_event_t* event) {
                sizeof(preferences.password_salt));
         memset(preferences.password_hash, 0,
                sizeof(preferences.password_hash));
+    } else if (category == 4u && y >= 104 && y < 144 &&
+               x >= (int32_t)NAV_WIDTH + 22 &&
+               x < (int32_t)NAV_WIDTH + 182) {
+        preferences.click_once_open = !preferences.click_once_open;
     } else {
         return;
     }

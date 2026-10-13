@@ -45,7 +45,22 @@ typedef struct {
     uint32_t login_enabled;
     uint8_t password_salt[MOSDESK_PASSWORD_SALT_SIZE];
     uint8_t password_hash[MOSDESK_PASSWORD_HASH_SIZE];
+    uint32_t click_once_open;
 } mosdesk_settings_t;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t mouse_speed;
+    uint32_t accent_color;
+    uint32_t cursor_fill;
+    uint32_t cursor_scale;
+    uint32_t cursor_pack;
+    uint32_t wallpaper;
+    uint32_t onboarding_complete;
+    uint32_t login_enabled;
+    uint8_t password_salt[MOSDESK_PASSWORD_SALT_SIZE];
+    uint8_t password_hash[MOSDESK_PASSWORD_HASH_SIZE];
+} mosdesk_settings_v2_t;
 
 typedef struct {
     uint32_t magic;
@@ -72,6 +87,7 @@ static inline mosdesk_settings_t mosdesk_settings_default(void) {
     settings.cursor_fill = 0xFFFFFFFFu;
     settings.cursor_scale = 1u;
     settings.cursor_pack = MOSDESK_CURSOR_PACK_POSY;
+    settings.click_once_open = 0u;
     return settings;
 }
 
@@ -86,6 +102,27 @@ static inline mosdesk_settings_t mosdesk_settings_load(void) {
                 (uintptr_t)&settings, sizeof(settings)) !=
             (long)sizeof(settings))
             settings = mosdesk_settings_default();
+    } else if (size == (long)sizeof(mosdesk_settings_v2_t)) {
+        mosdesk_settings_v2_t legacy;
+        if ((long)MOSDESK_SYSCALL(SYS_READ, (uintptr_t)fd,
+                (uintptr_t)&legacy, sizeof(legacy)) ==
+            (long)sizeof(legacy)) {
+            settings.magic = legacy.magic;
+            settings.mouse_speed = legacy.mouse_speed;
+            settings.accent_color = legacy.accent_color;
+            settings.cursor_fill = legacy.cursor_fill;
+            settings.cursor_scale = legacy.cursor_scale;
+            settings.cursor_pack = legacy.cursor_pack;
+            settings.wallpaper = legacy.wallpaper;
+            settings.onboarding_complete = legacy.onboarding_complete;
+            settings.login_enabled = legacy.login_enabled;
+            for (uint32_t i = 0; i < MOSDESK_PASSWORD_SALT_SIZE; i++)
+                settings.password_salt[i] = legacy.password_salt[i];
+            for (uint32_t i = 0; i < MOSDESK_PASSWORD_HASH_SIZE; i++)
+                settings.password_hash[i] = legacy.password_hash[i];
+        } else {
+            settings = mosdesk_settings_default();
+        }
     } else if (size == (long)sizeof(mosdesk_settings_v1_t)) {
         mosdesk_settings_v1_t legacy;
         if ((long)MOSDESK_SYSCALL(SYS_READ, (uintptr_t)fd,
@@ -123,7 +160,8 @@ static inline mosdesk_settings_t mosdesk_settings_load(void) {
         settings.cursor_pack > MOSDESK_CURSOR_PACK_CLASSIC ||
         settings.wallpaper > 2u ||
         settings.onboarding_complete > 1u ||
-        settings.login_enabled > 1u)
+        settings.login_enabled > 1u ||
+        settings.click_once_open > 1u)
         return mosdesk_settings_default();
     settings.accent_color |= 0xFF000000u;
     settings.cursor_fill |= 0xFF000000u;

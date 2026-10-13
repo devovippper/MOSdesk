@@ -33,6 +33,9 @@
 #define DESKTOP_APP_PATH_SIZE 192u
 #define DESKTOP_APP_NAME_SIZE 48u
 #define DESKTOP_DIR_ENTRIES 128u
+#define BROWSER_MAX_ENTRIES 128u
+#define BROWSER_PATH_SIZE 192u
+#define BROWSER_ROW_HEIGHT 28u
 #define DESKTOP_ICON_SIZE SYSCALL_WINDOW_ICON_SIZE
 #define DESKTOP_ICON_PIXELS SYSCALL_WINDOW_ICON_PIXELS
 #define RUN_ICON_MAX_SIZE (1024u * 1024u)
@@ -85,11 +88,37 @@ typedef struct {
     uint32_t icon_pixels[DESKTOP_ICON_PIXELS];
 } desktop_app_t;
 
+typedef enum {
+    CLICK_ACTION_NONE,
+    CLICK_ACTION_HOME,
+    CLICK_ACTION_SYSTEM,
+    CLICK_ACTION_APPLICATION,
+    CLICK_ACTION_BROWSER_ENTRY
+} click_action_t;
+
 static syscall_graphics_info_t display;
 static uint32_t* canvas;
 static cached_window_t cache[MAX_WINDOWS];
 static desktop_app_t desktop_apps[MAX_DESKTOP_APPS];
 static uint32_t desktop_app_count;
+static syscall_dirent_t browser_entries[BROWSER_MAX_ENTRIES];
+static uint32_t browser_entry_count;
+static uint32_t browser_selected = UINT32_MAX;
+static uint32_t browser_scroll;
+static uint32_t browser_window_id;
+static uint32_t* browser_pixels;
+static uint32_t browser_width;
+static uint32_t browser_height;
+static char browser_path[BROWSER_PATH_SIZE];
+static char browser_message[64];
+static click_action_t pending_click_action;
+static char pending_click_path[BROWSER_PATH_SIZE];
+static int32_t pending_click_x;
+static int32_t pending_click_y;
+static click_action_t last_click_action;
+static char last_click_path[BROWSER_PATH_SIZE];
+static uint32_t last_click_time;
+static bool last_click_valid;
 static int32_t cursor_x;
 static int32_t cursor_y;
 static int32_t mouse_remainder_x;
@@ -136,6 +165,17 @@ static uint32_t icon_poll_frames;
 static uint8_t* wm_read_file(const char* path, size_t max_size, size_t* size);
 static void paint_wallpaper(uint32_t* target);
 static void log_message(const char* message);
+static void browser_close(void);
+static void browser_open(const char* path);
+static void browser_render(void);
+static void browser_mouse_down(int32_t x, int32_t y,
+                               const syscall_window_info_t* info);
+static void activate_pending_click(uint32_t time_ms);
+static void focus_window(syscall_window_info_t* info);
+static cached_window_t* cache_for(uint32_t id);
+static bool set_window_mode(const syscall_window_info_t* info,
+                            cached_window_t* entry, uint32_t mode);
+static void post_simple_event(uint32_t id, uint32_t type);
 
 static void* wm_malloc(size_t size) {
     uint64_t result = mos_syscall3(SYS_HEAP, SYS_HEAP_ALLOC, 0, size);
@@ -695,12 +735,15 @@ static bool path_join(char* output, size_t capacity,
                       const char* directory, const char* name) {
     size_t directory_length = strlen(directory);
     size_t name_length = strlen(name);
-    if (!directory_length || !name_length ||
-        directory_length + name_length + 2u > capacity)
+    if (!directory_length || !name_length) return false;
+    bool needs_separator = directory[directory_length - 1u] != '/';
+    if (directory_length + name_length + (needs_separator ? 2u : 1u) >
+        capacity)
         return false;
     memcpy(output, directory, directory_length);
-    output[directory_length] = '/';
-    memcpy(output + directory_length + 1u, name, name_length + 1u);
+    size_t name_offset = directory_length;
+    if (needs_separator) output[name_offset++] = '/';
+    memcpy(output + name_offset, name, name_length + 1u);
     return true;
 }
 
@@ -921,6 +964,298 @@ static void fit_text_px(char* dst, size_t dst_size, const char* src,
             dst[len + 2u] = '\0';
             if ((int32_t)moswm_text_width(dst, scale) <= max_px) return;
             dst[len] = '\0';
+        }
+    }
+}
+
+static void browser_refresh_directory(void) {
+    browser_entry_count = 0;
+    browser_selected = UINT32_MAX;
+    browser_scroll = 0;
+    uint64_t result = mos_syscall3(SYS_LISTDIR,
+        (uint64_t)(uintptr_t)browser_path,
+        (uint64_t)(uintptr_t)browser_entries, BROWSER_MAX_ENTRIES);
+    if ((int64_t)result < 0) {
+        strcpy(browser_message, "Unable to list this folder");
+        return;
+    }
+    uint32_t count = result > BROWSER_MAX_ENTRIES
+        ? BROWSER_MAX_ENTRIES : (uint32_t)result;
+    for (uint32_t i = 0; i < count; i++) {
+        if (browser_entries[i].hidden) continue;
+        if (browser_entry_count != i)
+            browser_entries[browser_entry_count] = browser_entries[i];
+        browser_entry_count++;
+    }
+    browser_message[0] = '\0';
+}
+
+static void browser_close(void) {
+    if (browser_window_id) mos_window_close(browser_window_id);
+    browser_window_id = 0;
+    wm_free(browser_pixels);
+    browser_pixels = NULL;
+    browser_width = 0;
+    browser_height = 0;
+    browser_entry_count = 0;
+    browser_selected = UINT32_MAX;
+    last_click_valid = false;
+}
+
+static void browser_open(const char* path) {
+    if (!path || strlen(path) >= sizeof(browser_path) ||
+        mos_syscall3(SYS_IS_DIR, (uint64_t)(uintptr_t)path, 0, 0) != 1u) {
+        strcpy(status_message, "Folder is unavailable");
+        return;
+    }
+    memcpy(browser_path, path, strlen(path) + 1u);
+    browser_refresh_directory();
+    if (!browser_window_id) {
+        uint32_t width = display.width > 700u ? 660u : display.width - 36u;
+        uint32_t height = display.height > TASKBAR_HEIGHT + 540u
+            ? 500u : display.height - TASKBAR_HEIGHT - 36u;
+        if (width < 240u) width = display.width - 36u;
+        if (height < 96u) height = 96u;
+        uint32_t x = (display.width - width) / 2u;
+        uint32_t y = (display.height - TASKBAR_HEIGHT - height) / 2u;
+        browser_window_id = mos_window_create(0, x, y, width, height,
+                                               "File Browser");
+        if (!browser_window_id) {
+            strcpy(status_message, "Unable to open File Browser");
+            return;
+        }
+        browser_width = width;
+        browser_height = height;
+        browser_pixels = (uint32_t*)wm_malloc(
+            (size_t)width * height * sizeof(uint32_t));
+        if (!browser_pixels) {
+            browser_close();
+            strcpy(status_message, "Unable to allocate File Browser");
+            return;
+        }
+        syscall_window_style_t style = {
+            .title_bar = 0xFF263945u,
+            .title_text = 0xFFF4F7F8u,
+            .close_button = 0xFF263945u,
+            .minimize_button = 0xFF263945u,
+            .maximize_button = 0xFF263945u,
+            .close_icon = 0xFFF4F7F8u,
+            .minimize_icon = 0xFFF4F7F8u,
+            .maximize_icon = 0xFFF4F7F8u,
+            .border = 0xFF536773u,
+            .content_background = 0xFFF3F5F6u
+        };
+        if (mos_window_set_resizable(browser_window_id, true) != SYS_SUCCESS ||
+            mos_window_set_style(browser_window_id, style) != SYS_SUCCESS) {
+            browser_close();
+            strcpy(status_message, "Unable to configure File Browser");
+            return;
+        }
+    }
+    syscall_window_info_t info;
+    if (mos_window_get_info(browser_window_id, &info) == SYS_SUCCESS) {
+        if (info.flags & SYSCALL_WINDOW_MINIMIZED) {
+            cached_window_t* entry = cache_for(browser_window_id);
+            if (entry && set_window_mode(&info, entry, MODE_NORMAL))
+                post_simple_event(browser_window_id,
+                                  SYSCALL_WINDOW_EVENT_RESTORED);
+        }
+        focus_window(&info);
+    } else {
+        strcpy(status_message, "Unable to focus File Browser");
+    }
+}
+
+static void browser_go_up(void) {
+    if (!strcmp(browser_path, "0:/")) return;
+    size_t length = strlen(browser_path);
+    while (length > 3u && browser_path[length - 1u] == '/')
+        browser_path[--length] = '\0';
+    while (length > 3u && browser_path[length - 1u] != '/') length--;
+    if (length <= 3u) {
+        strcpy(browser_path, "0:/");
+    } else {
+        browser_path[length - 1u] = '\0';
+    }
+    browser_refresh_directory();
+}
+
+static void browser_render(void) {
+    if (!browser_window_id || !browser_pixels) return;
+    syscall_window_info_t info;
+    if (mos_window_get_info(browser_window_id, &info) != SYS_SUCCESS) {
+        strcpy(status_message, "File Browser window is unavailable");
+        browser_close();
+        return;
+    }
+    if (info.width != browser_width || info.height != browser_height) {
+        size_t bytes = (size_t)info.width * info.height * sizeof(uint32_t);
+        uint32_t* resized = (uint32_t*)wm_malloc(bytes);
+        if (!resized) {
+            strcpy(status_message, "Unable to resize File Browser");
+            return;
+        }
+        wm_free(browser_pixels);
+        browser_pixels = resized;
+        browser_width = info.width;
+        browser_height = info.height;
+    }
+
+    uint32_t* screen_canvas = canvas;
+    uint32_t screen_width = display.width;
+    uint32_t screen_height = display.height;
+    canvas = browser_pixels;
+    display.width = browser_width;
+    display.height = browser_height;
+    fill_rect(0, 0, (int32_t)browser_width, (int32_t)browser_height,
+              0xFFF3F5F6u);
+    fill_rect(0, 0, (int32_t)browser_width, 44, 0xFFE6EAEDu);
+    fill_rect(0, 43, (int32_t)browser_width, 1, 0xFFD2D9DEu);
+    static const char* const controls[] = {"Home", "System", "Up", "Refresh"};
+    static const uint32_t control_x[] = {8u, 76u, 144u, 212u};
+    for (uint32_t i = 0; i < 4u; i++) {
+        fill_rect((int32_t)control_x[i], 7, 62, 29,
+                  0xFFD4E4EFu);
+        wm_text((int32_t)control_x[i] + 8, 15, controls[i],
+                0xFF34434Cu, 0, 1u);
+    }
+    char display_path[BROWSER_PATH_SIZE];
+    fit_text_px(display_path, sizeof(display_path), browser_path,
+                (int32_t)browser_width - 24, 1u);
+    wm_text(12, 52, display_path, 0xFF34434Cu, 0, 1u);
+    fill_rect(8, 70, (int32_t)browser_width - 16, 1, 0xFFD2D9DEu);
+
+    uint32_t visible_rows = browser_height > 80u
+        ? (browser_height - 80u) / BROWSER_ROW_HEIGHT : 0u;
+    if (browser_scroll > browser_entry_count)
+        browser_scroll = browser_entry_count;
+    for (uint32_t row = 0; row < visible_rows; row++) {
+        uint32_t index = browser_scroll + row;
+        if (index >= browser_entry_count) break;
+        int32_t y = 76 + (int32_t)row * (int32_t)BROWSER_ROW_HEIGHT;
+        if (browser_selected == index)
+            fill_rect(8, y, (int32_t)browser_width - 16,
+                      (int32_t)BROWSER_ROW_HEIGHT, 0xFFD4E4EFu);
+        moswm_file_icon_t icon =
+            browser_entries[index].type == SYSCALL_DIRENT_TYPE_DIR
+                ? MOSWM_ICON_FOLDER : MOSWM_ICON_DOCUMENT;
+        if (browser_entries[index].type == SYSCALL_DIRENT_TYPE_EXECUTABLE)
+            icon = MOSWM_ICON_CODE;
+        moswm_draw_file_icon_sized(browser_pixels, browser_width,
+            browser_height, 14, y + 4, icon, 20u);
+        char label[SYSCALL_DIRENT_NAME_SIZE];
+        fit_text_px(label, sizeof(label), browser_entries[index].name,
+                    (int32_t)browser_width - 64, 1u);
+        wm_text(44, y + 9, label, 0xFF273640u, 0, 1u);
+    }
+    if (browser_message[0])
+        wm_text(12, (int32_t)browser_height - 22, browser_message,
+                0xFFB43A32u, 0, 1u);
+    canvas = screen_canvas;
+    display.width = screen_width;
+    display.height = screen_height;
+    if (mos_window_present(browser_window_id, browser_pixels,
+            browser_width * sizeof(uint32_t), 0, 0,
+            browser_width, browser_height) != SYS_SUCCESS)
+        strcpy(status_message, "Unable to update File Browser");
+}
+
+static void queue_open_click(click_action_t action, const char* path) {
+    if (!path || strlen(path) >= sizeof(pending_click_path)) return;
+    pending_click_action = action;
+    memcpy(pending_click_path, path, strlen(path) + 1u);
+    pending_click_x = cursor_x;
+    pending_click_y = cursor_y;
+}
+
+static void browser_mouse_down(int32_t x, int32_t y,
+                               const syscall_window_info_t* info) {
+    if (y >= 7 && y < 36) {
+        last_click_valid = false;
+        if (x >= 8 && x < 70)
+            browser_open(MOSDESK_USERS_PATH);
+        else if (x >= 76 && x < 138)
+            browser_open("0:/");
+        else if (x >= 144 && x < 206)
+            browser_go_up();
+        else if (x >= 212 && x < 274)
+            browser_refresh_directory();
+        return;
+    }
+    if (y < 76) {
+        last_click_valid = false;
+        return;
+    }
+    uint32_t row = (uint32_t)(y - 76) / BROWSER_ROW_HEIGHT;
+    uint32_t index = browser_scroll + row;
+    uint32_t visible_rows = info->height > 80u
+        ? (info->height - 80u) / BROWSER_ROW_HEIGHT : 0u;
+    if (row >= visible_rows || index >= browser_entry_count) return;
+    browser_selected = index;
+    char entry_path[BROWSER_PATH_SIZE];
+    if (!path_join(entry_path, sizeof(entry_path), browser_path,
+                   browser_entries[index].name)) {
+        strcpy(browser_message, "Folder path is too long");
+        return;
+    }
+    queue_open_click(CLICK_ACTION_BROWSER_ENTRY, entry_path);
+}
+
+static void activate_pending_click(uint32_t time_ms) {
+    if (pending_click_action == CLICK_ACTION_NONE) return;
+    click_action_t action = pending_click_action;
+    char path[BROWSER_PATH_SIZE];
+    memcpy(path, pending_click_path, strlen(pending_click_path) + 1u);
+    pending_click_action = CLICK_ACTION_NONE;
+    bool activate = desktop_settings.click_once_open != 0u;
+    if (!activate && last_click_valid &&
+        last_click_action == action && !strcmp(last_click_path, path) &&
+        (uint32_t)(time_ms - last_click_time) <= 500u) {
+        activate = true;
+        last_click_valid = false;
+    } else {
+        last_click_action = action;
+        memcpy(last_click_path, path, strlen(path) + 1u);
+        last_click_time = time_ms;
+        last_click_valid = true;
+    }
+    if (!activate) return;
+
+    if (action == CLICK_ACTION_HOME) {
+        browser_open(MOSDESK_USERS_PATH);
+    } else if (action == CLICK_ACTION_SYSTEM) {
+        browser_open("0:/");
+    } else if (action == CLICK_ACTION_APPLICATION) {
+        if ((int64_t)mos_syscall3(SYS_EXEC,
+                (uint64_t)(uintptr_t)path, 0, 0) < 0)
+            strcpy(status_message, "Unable to open desktop application");
+    } else if (action == CLICK_ACTION_BROWSER_ENTRY) {
+        uint64_t is_directory = mos_syscall3(SYS_IS_DIR,
+            (uint64_t)(uintptr_t)path, 0, 0);
+        if (is_directory == 1u) {
+            browser_open(path);
+        } else {
+            const char* name = path;
+            for (const char* cursor = path; *cursor; cursor++)
+                if (*cursor == '/') name = cursor + 1;
+            bool runnable = is_run_name(name);
+            for (uint32_t i = 0; i < browser_entry_count; i++) {
+                char entry_path[BROWSER_PATH_SIZE];
+                if (browser_entries[i].type ==
+                        SYSCALL_DIRENT_TYPE_EXECUTABLE &&
+                    path_join(entry_path, sizeof(entry_path), browser_path,
+                              browser_entries[i].name) &&
+                    !strcmp(entry_path, path)) {
+                    runnable = true;
+                    break;
+                }
+            }
+            if (!runnable) {
+                strcpy(browser_message, "This item is not runnable");
+            } else if ((int64_t)mos_syscall3(SYS_EXEC,
+                           (uint64_t)(uintptr_t)path, 0, 0) < 0) {
+                strcpy(browser_message, "Unable to run this item");
+            }
         }
     }
 }
@@ -1146,6 +1481,17 @@ static bool desktop_app_at(int32_t px, int32_t py, uint32_t* app_index) {
         }
     }
     return false;
+}
+
+static click_action_t desktop_shortcut_at(int32_t px, int32_t py,
+                                          uint32_t* app_index) {
+    if (px >= 8 && px < 104 && py >= 14 && py < 104)
+        return CLICK_ACTION_HOME;
+    if (px >= 8 && px < 104 && py >= 112 && py < 202)
+        return CLICK_ACTION_SYSTEM;
+    if (desktop_app_at(px, py, app_index))
+        return CLICK_ACTION_APPLICATION;
+    return CLICK_ACTION_NONE;
 }
 
 static void draw_desktop_icons(void) {
@@ -2027,10 +2373,12 @@ static void move_dragged_window(syscall_window_info_t* windows,
 }
 
 static void on_mouse_down(syscall_window_info_t* windows, uint64_t count) {
+    pending_click_action = CLICK_ACTION_NONE;
     uint32_t taskbar_y = display.height - TASKBAR_HEIGHT;
     if (start_menu_open && cursor_x >= 12 && cursor_x < 298 &&
         cursor_y >= (int32_t)taskbar_y - 268 &&
         cursor_y < (int32_t)taskbar_y - 10) {
+        last_click_valid = false;
         if (cursor_y >= (int32_t)taskbar_y - 192 &&
             cursor_y < (int32_t)taskbar_y - 156) {
             const char* settings_path = "0:/programs/mosdesk/mosdesk.run";
@@ -2043,6 +2391,7 @@ static void on_mouse_down(syscall_window_info_t* windows, uint64_t count) {
         return;
     }
     if ((uint32_t)cursor_y >= taskbar_y) {
+        last_click_valid = false;
         if (cursor_x < 44) {
             start_menu_open = !start_menu_open;
             return;
@@ -2069,12 +2418,17 @@ static void on_mouse_down(syscall_window_info_t* windows, uint64_t count) {
         window_at(windows, count, cursor_x, cursor_y);
     if (!info) {
         start_menu_open = false;
-        uint32_t app_index;
-        if (desktop_app_at(cursor_x, cursor_y, &app_index)) {
-            int64_t process_id = (int64_t)mos_syscall3(SYS_EXEC,
-                (uint64_t)(uintptr_t)desktop_apps[app_index].path, 0, 0);
-            if (process_id < 0)
-                strcpy(status_message, "Unable to open desktop application");
+        uint32_t app_index = UINT32_MAX;
+        click_action_t action =
+            desktop_shortcut_at(cursor_x, cursor_y, &app_index);
+        if (action == CLICK_ACTION_HOME) {
+            queue_open_click(action, MOSDESK_USERS_PATH);
+        } else if (action == CLICK_ACTION_SYSTEM) {
+            queue_open_click(action, "0:/");
+        } else if (action == CLICK_ACTION_APPLICATION) {
+            queue_open_click(action, desktop_apps[app_index].path);
+        } else {
+            last_click_valid = false;
         }
         return;
     }
@@ -2082,6 +2436,19 @@ static void on_mouse_down(syscall_window_info_t* windows, uint64_t count) {
     int32_t x = cursor_x - (int32_t)info->x;
     int32_t y = cursor_y - (int32_t)info->y;
     int32_t right = (int32_t)info->width + 1;
+    if (info->id == browser_window_id) {
+        if (y >= (int32_t)TITLE_HEIGHT) {
+            browser_mouse_down(x - 1,
+                y - (int32_t)TITLE_HEIGHT - 1, info);
+            return;
+        }
+        if (x >= right - 24) {
+            last_click_valid = false;
+            browser_close();
+            return;
+        }
+    }
+    last_click_valid = false;
     if (y < (int32_t)TITLE_HEIGHT) {
         if (x >= right - 24) {
             request_close(info);
@@ -2098,7 +2465,16 @@ static void on_mouse_down(syscall_window_info_t* windows, uint64_t count) {
     }
 }
 
-static void on_mouse_up(syscall_window_info_t* windows, uint64_t count) {
+static void on_mouse_up(syscall_window_info_t* windows, uint64_t count,
+                        uint32_t time_ms) {
+    if (pending_click_action != CLICK_ACTION_NONE) {
+        int32_t dx = cursor_x - pending_click_x;
+        int32_t dy = cursor_y - pending_click_y;
+        if (dx >= -6 && dx <= 6 && dy >= -6 && dy <= 6)
+            activate_pending_click(time_ms);
+        else
+            pending_click_action = CLICK_ACTION_NONE;
+    }
     if (!dragging_id) return;
     for (uint64_t i = 0; i < count; i++) {
         syscall_window_info_t* info = &windows[i];
@@ -2236,10 +2612,23 @@ static void route_input(const syscall_input_event_t* input,
             if (event.y >= 0) mos_window_post_event(under->id, &event);
         }
         if (!was_down && is_down) on_mouse_down(windows, count);
-        else if (was_down && !is_down) on_mouse_up(windows, count);
+        else if (was_down && !is_down)
+            on_mouse_up(windows, count, input->time_ms);
     } else if (input->type == SYSCALL_INPUT_MOUSE_WHEEL) {
         syscall_window_info_t* under =
             window_at(windows, count, cursor_x, cursor_y);
+        if (under && under->id == browser_window_id) {
+            uint32_t visible_rows = browser_height > 80u
+                ? (browser_height - 80u) / BROWSER_ROW_HEIGHT : 0u;
+            uint32_t max_scroll = browser_entry_count > visible_rows
+                ? browser_entry_count - visible_rows : 0u;
+            if (input->wheel < 0 && browser_scroll < max_scroll)
+                browser_scroll++;
+            else if (input->wheel > 0 && browser_scroll)
+                browser_scroll--;
+            last_click_valid = false;
+            return;
+        }
         if (under) {
             syscall_window_event_t event = {
                 .type = SYSCALL_WINDOW_EVENT_MOUSE_WHEEL,
@@ -2352,6 +2741,7 @@ int main(void) {
             settings_poll_frames = 0;
             load_desktop_settings();
         }
+        browser_render();
         uint64_t count = mos_window_list(windows, MAX_WINDOWS);
         if (count > MAX_WINDOWS) {
             strcpy(status_message, "Unable to enumerate windows");
