@@ -171,7 +171,9 @@ static void draw_control_labels(void) {
             draw_text((int32_t)NAV_WIDTH + 22, 188, "Press Enter to save",
                       0xFF667680u, false);
         } else if (preferences.login_enabled) {
-            draw_text((int32_t)NAV_WIDTH + 22, 161,
+            /* Below the Change/Disable password buttons (y 106-185) so the
+             * note no longer draws on top of the button labels. */
+            draw_text((int32_t)NAV_WIDTH + 22, 199,
                       "Sign-in is required after restart.",
                       0xFF667680u, false);
         } else {
