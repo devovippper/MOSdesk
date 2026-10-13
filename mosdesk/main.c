@@ -43,9 +43,11 @@ static const uint32_t cursor_colors[] = {
 };
 
 static const uint32_t accent_colors[] = {
-    0xFF59A6D8u, 0xFF48B8A5u, 0xFFD28C54u
+    0xFF59A6D8u, 0xFF48B8A5u, 0xFFD28C54u,
+    0xFF69A86Au, 0xFFD66B83u, 0xFFE1B64Cu
 };
-static const char* const wallpaper_names[] = {"Blue", "Teal", "Copper"};
+static const char* const wallpaper_names[] = {
+    "Blue", "Teal", "Copper", "Forest", "Rose", "Gold"};
 
 static ttrend_surface_t text_target(void) {
     return (ttrend_surface_t){surface.pixels, surface.width,
@@ -114,15 +116,19 @@ static void draw_control_labels(void) {
                   0xFF34434Cu, true);
         /* One label per swatch: proportional text cannot be aligned with
          * runs of spaces the way the monospace bitmap font was. */
-        static const char* const accent_names[] = {"Blue", "Teal", "Copper"};
-        for (uint32_t i = 0; i < 3; i++)
+        static const char* const accent_names[] = {
+            "Blue", "Teal", "Copper", "Forest", "Rose", "Gold"};
+        for (uint32_t i = 0; i < 6; i++)
             draw_text((int32_t)NAV_WIDTH + 22 + (int32_t)i * 50, 132,
                       accent_names[i], 0xFF667680u, false);
-        draw_text((int32_t)NAV_WIDTH + 22, 185, "Wallpaper",
+        draw_text((int32_t)NAV_WIDTH + 22, 165, "Wallpaper theme",
                   0xFF34434Cu, true);
-        for (uint32_t i = 0; i < 3u; i++)
-            draw_text((int32_t)NAV_WIDTH + 22 + (int32_t)i * 50, 248,
+        for (uint32_t i = 0; i < 6u; i++)
+            draw_text((int32_t)NAV_WIDTH + 22 + (int32_t)i * 50, 238,
                       wallpaper_names[i], 0xFF667680u, false);
+        draw_text((int32_t)NAV_WIDTH + 22, 270,
+                  "Photos and modes: File Browser",
+                  0xFF667680u, false);
     } else if (category == 1u) {
         char speed[5];
         uint32_t length;
@@ -181,12 +187,16 @@ static void draw_control_labels(void) {
                       "The desktop opens automatically.",
                       0xFF667680u, false);
         }
-    } else {
+    } else if (category == 4u) {
         draw_text((int32_t)NAV_WIDTH + 22, 63, "Click once to open / run",
                   0xFF34434Cu, true);
         draw_text((int32_t)NAV_WIDTH + 22, 161,
                   "Off uses double-click to open / run.",
                   0xFF667680u, false);
+        draw_text((int32_t)NAV_WIDTH + 22, 195, "Desktop icon grid",
+                  0xFF34434Cu, true);
+        draw_text((int32_t)NAV_WIDTH + 22, 273,
+                  "Off allows free placement.", 0xFF667680u, false);
     }
 }
 
@@ -220,21 +230,22 @@ static void draw_window(void) {
     }
 
     if (category == 0u) {
-        for (uint32_t i = 0; i < 3; i++) {
+        for (uint32_t i = 0; i < 6; i++) {
             int32_t x = (int32_t)NAV_WIDTH + 22 + (int32_t)i * 50;
             fill_rect(x, 96, 30, 30, accent_colors[i]);
             if ((preferences.accent_color & 0x00FFFFFFu) ==
                 (accent_colors[i] & 0x00FFFFFFu))
                 fill_rect(x - 2, 94, 34, 2, 0xFF34434Cu);
         }
-        static const uint32_t wallpaper_colors[3] = {
-            0xFF31536Au, 0xFF28645Fu, 0xFF80502Eu
+        static const uint32_t wallpaper_colors[6] = {
+            0xFF31536Au, 0xFF28645Fu, 0xFF80502Eu,
+            0xFF31583Cu, 0xFF713F51u, 0xFF725C2Au
         };
-        for (uint32_t i = 0; i < 3; i++) {
+        for (uint32_t i = 0; i < 6; i++) {
             int32_t x = (int32_t)NAV_WIDTH + 22 + (int32_t)i * 50;
-            fill_rect(x, 212, 44, 28, wallpaper_colors[i]);
+            fill_rect(x, 202, 44, 28, wallpaper_colors[i]);
             if (preferences.wallpaper == i)
-                fill_rect(x - 2, 210, 48, 2, 0xFF34434Cu);
+                fill_rect(x - 2, 200, 48, 2, 0xFF34434Cu);
         }
     } else if (category == 1u) {
         int32_t track_x = (int32_t)NAV_WIDTH + 22;
@@ -300,6 +311,9 @@ static void draw_window(void) {
         fill_rect((int32_t)NAV_WIDTH + 22, 106, 160, 34,
                   preferences.click_once_open
                       ? preferences.accent_color : 0xFFDCE2E6u);
+        fill_rect((int32_t)NAV_WIDTH + 22, 229, 160, 34,
+                  preferences.grid_enabled
+                      ? preferences.accent_color : 0xFFDCE2E6u);
     }
     draw_control_labels();
     if (category == 3u && !password_editing) {
@@ -314,6 +328,10 @@ static void draw_window(void) {
         draw_text((int32_t)NAV_WIDTH + 33, 117,
                   preferences.click_once_open ? "On" : "Off",
                   preferences.click_once_open ? 0xFFFFFFFFu : 0xFF34434Cu,
+                  false);
+        draw_text((int32_t)NAV_WIDTH + 33, 240,
+                  preferences.grid_enabled ? "On" : "Off",
+                  preferences.grid_enabled ? 0xFFFFFFFFu : 0xFF34434Cu,
                   false);
     }
     if (settings_message[0])
@@ -374,12 +392,13 @@ static void handle_mouse(const syscall_window_event_t* event) {
         settings_message[0] = '\0';
     } else if (category == 0u && y >= 92 && y < 132) {
         int32_t index = (x - (int32_t)NAV_WIDTH - 22) / 50;
-        if (index < 0 || index >= 3) return;
+        if (index < 0 || index >= 6) return;
         preferences.accent_color = accent_colors[index];
-    } else if (category == 0u && y >= 210 && y < 242) {
+    } else if (category == 0u && y >= 198 && y < 234) {
         int32_t index = (x - (int32_t)NAV_WIDTH - 22) / 50;
-        if (index < 0 || index >= 3) return;
+        if (index < 0 || index >= 6) return;
         preferences.wallpaper = (uint32_t)index;
+        preferences.accent_color = accent_colors[index];
     } else if (category == 1u && y >= 94 && y < 118) {
         int32_t track_x = (int32_t)NAV_WIDTH + 22;
         int32_t track_width = (int32_t)surface.width - track_x - 24;
@@ -426,6 +445,10 @@ static void handle_mouse(const syscall_window_event_t* event) {
                x >= (int32_t)NAV_WIDTH + 22 &&
                x < (int32_t)NAV_WIDTH + 182) {
         preferences.click_once_open = !preferences.click_once_open;
+    } else if (category == 4u && y >= 227 && y < 267 &&
+               x >= (int32_t)NAV_WIDTH + 22 &&
+               x < (int32_t)NAV_WIDTH + 182) {
+        preferences.grid_enabled = !preferences.grid_enabled;
     } else {
         return;
     }

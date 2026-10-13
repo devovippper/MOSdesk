@@ -19,17 +19,20 @@ if [ ! -f "$PACKAGE_TOOL" ]; then
 fi
 
 mkdir -p "$DIST" "$PACKAGE/programs/mosWM/assets/fonts" \
-    "$PACKAGE/programs/mosWM/assets/cursors" "$PACKAGE/services"
+    "$PACKAGE/programs/mosWM/assets/cursors" \
+    "$PACKAGE/programs/mosWM/assets/wallpapers" "$PACKAGE/services"
 "$SDK_BUILD" --output "$DIST/mosWM.run" "$SCRIPT_DIR"
 cp "$DIST/mosWM.run" "$PACKAGE/programs/mosWM/mosWM.run"
 cp -R "$SCRIPT_DIR/assets/cursors/." \
     "$PACKAGE/programs/mosWM/assets/cursors/"
 rm -f "$PACKAGE/programs/mosWM/assets/posy.cur"
 cp "$SCRIPT_DIR/assets/NOTICE.txt" "$PACKAGE/programs/mosWM/assets/NOTICE.txt"
+cp "$SCRIPT_DIR/assets/wallpapers/"*.qoi \
+    "$PACKAGE/programs/mosWM/assets/wallpapers/"
 cp "$SCRIPT_DIR/assets/fonts/"Inter-* "$PACKAGE/programs/mosWM/assets/fonts/"
 cp "$SCRIPT_DIR/mosWM.pkg" "$PACKAGE/mosWM.pkg"
 cp "$SCRIPT_DIR/mosWM.service" "$PACKAGE/services/mosWM.service"
-python3 "$PACKAGE_TOOL" "$PACKAGE" "$DIST/mosWM.mpkg"
+python3 "$PACKAGE_TOOL" "$PACKAGE" "$DIST/mosWM.mpkg" --store
 
 printf 'mosWM deliver package: %s\n' "$DIST/mosWM.mpkg"
 printf 'Program bundle:        %s\n' "$DIST/mosWM.run"

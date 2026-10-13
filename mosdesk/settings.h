@@ -32,6 +32,11 @@
 #define MOSDESK_CURSOR_PACK_CLASSIC 1u
 #define MOSDESK_PASSWORD_SALT_SIZE 16u
 #define MOSDESK_PASSWORD_HASH_SIZE 32u
+#define MOSDESK_WALLPAPER_PATH_SIZE 192u
+#define MOSDESK_DESKTOP_ICON_COUNT 34u
+#define MOSDESK_WALLPAPER_FILL 0u
+#define MOSDESK_WALLPAPER_CROP 1u
+#define MOSDESK_WALLPAPER_STRETCH 2u
 
 typedef struct {
     uint32_t magic;
@@ -46,7 +51,28 @@ typedef struct {
     uint8_t password_salt[MOSDESK_PASSWORD_SALT_SIZE];
     uint8_t password_hash[MOSDESK_PASSWORD_HASH_SIZE];
     uint32_t click_once_open;
+    uint32_t grid_enabled;
+    uint32_t wallpaper_mode;
+    uint32_t wallpaper_rotation;
+    char wallpaper_path[MOSDESK_WALLPAPER_PATH_SIZE];
+    uint32_t desktop_icon_x[MOSDESK_DESKTOP_ICON_COUNT];
+    uint32_t desktop_icon_y[MOSDESK_DESKTOP_ICON_COUNT];
 } mosdesk_settings_t;
+
+typedef struct {
+    uint32_t magic;
+    uint32_t mouse_speed;
+    uint32_t accent_color;
+    uint32_t cursor_fill;
+    uint32_t cursor_scale;
+    uint32_t cursor_pack;
+    uint32_t wallpaper;
+    uint32_t onboarding_complete;
+    uint32_t login_enabled;
+    uint8_t password_salt[MOSDESK_PASSWORD_SALT_SIZE];
+    uint8_t password_hash[MOSDESK_PASSWORD_HASH_SIZE];
+    uint32_t click_once_open;
+} mosdesk_settings_v3_t;
 
 typedef struct {
     uint32_t magic;
@@ -88,6 +114,11 @@ static inline mosdesk_settings_t mosdesk_settings_default(void) {
     settings.cursor_scale = 1u;
     settings.cursor_pack = MOSDESK_CURSOR_PACK_POSY;
     settings.click_once_open = 0u;
+    settings.grid_enabled = 1u;
+    for (uint32_t i = 0; i < MOSDESK_DESKTOP_ICON_COUNT; i++) {
+        settings.desktop_icon_x[i] = UINT32_MAX;
+        settings.desktop_icon_y[i] = UINT32_MAX;
+    }
     return settings;
 }
 
@@ -102,6 +133,28 @@ static inline mosdesk_settings_t mosdesk_settings_load(void) {
                 (uintptr_t)&settings, sizeof(settings)) !=
             (long)sizeof(settings))
             settings = mosdesk_settings_default();
+    } else if (size == (long)sizeof(mosdesk_settings_v3_t)) {
+        mosdesk_settings_v3_t legacy;
+        if ((long)MOSDESK_SYSCALL(SYS_READ, (uintptr_t)fd,
+                (uintptr_t)&legacy, sizeof(legacy)) ==
+            (long)sizeof(legacy)) {
+            settings.magic = legacy.magic;
+            settings.mouse_speed = legacy.mouse_speed;
+            settings.accent_color = legacy.accent_color;
+            settings.cursor_fill = legacy.cursor_fill;
+            settings.cursor_scale = legacy.cursor_scale;
+            settings.cursor_pack = legacy.cursor_pack;
+            settings.wallpaper = legacy.wallpaper;
+            settings.onboarding_complete = legacy.onboarding_complete;
+            settings.login_enabled = legacy.login_enabled;
+            for (uint32_t i = 0; i < MOSDESK_PASSWORD_SALT_SIZE; i++)
+                settings.password_salt[i] = legacy.password_salt[i];
+            for (uint32_t i = 0; i < MOSDESK_PASSWORD_HASH_SIZE; i++)
+                settings.password_hash[i] = legacy.password_hash[i];
+            settings.click_once_open = legacy.click_once_open;
+        } else {
+            settings = mosdesk_settings_default();
+        }
     } else if (size == (long)sizeof(mosdesk_settings_v2_t)) {
         mosdesk_settings_v2_t legacy;
         if ((long)MOSDESK_SYSCALL(SYS_READ, (uintptr_t)fd,
@@ -158,7 +211,10 @@ static inline mosdesk_settings_t mosdesk_settings_load(void) {
         settings.mouse_speed < 50u || settings.mouse_speed > 200u ||
         (settings.cursor_scale != 1u && settings.cursor_scale != 2u) ||
         settings.cursor_pack > MOSDESK_CURSOR_PACK_CLASSIC ||
-        settings.wallpaper > 2u ||
+        settings.wallpaper > 5u ||
+        settings.grid_enabled > 1u ||
+        settings.wallpaper_mode > MOSDESK_WALLPAPER_STRETCH ||
+        settings.wallpaper_path[MOSDESK_WALLPAPER_PATH_SIZE - 1u] != '\0' ||
         settings.onboarding_complete > 1u ||
         settings.login_enabled > 1u ||
         settings.click_once_open > 1u)

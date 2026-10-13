@@ -29,4 +29,5 @@ uint64_t mos_syscall3(uint64_t n, uint64_t a, uint64_t b, uint64_t c);
 #define SYSCALL_DIRENT_TYPE_FILE 1u
 #define SYSCALL_DIRENT_TYPE_DIR 2u
 #define SYSCALL_DIRENT_TYPE_EXECUTABLE 3u
+#define SYSCALL_DIRENT_NAME_SIZE 64u
 typedef struct { char name[64]; uint32_t type; uint32_t hidden; } syscall_dirent_t;

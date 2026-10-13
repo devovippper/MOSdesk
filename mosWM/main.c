@@ -12,6 +12,17 @@
 #include "../mosdesk/password_hash.h"
 #include "../mosdesk/input.h"
 
+#ifndef SYSCALL_WINDOW_ICON_PIXELS
+#define SYSCALL_WINDOW_ICON_SIZE 32u
+#define SYSCALL_WINDOW_ICON_PIXELS \
+    (SYSCALL_WINDOW_ICON_SIZE * SYSCALL_WINDOW_ICON_SIZE)
+static uint64_t mos_window_get_icon(uint32_t id, uint32_t* pixels) {
+    (void)id;
+    (void)pixels;
+    return (uint64_t)-4;
+}
+#endif
+
 #ifndef SYS_EXEC
 #define SYS_EXEC 33u
 #endif
@@ -39,6 +50,8 @@
 #define DESKTOP_ICON_SIZE SYSCALL_WINDOW_ICON_SIZE
 #define DESKTOP_ICON_PIXELS SYSCALL_WINDOW_ICON_PIXELS
 #define RUN_ICON_MAX_SIZE (1024u * 1024u)
+#define WALLPAPER_MAX_FILE_SIZE (20u * 1024u * 1024u)
+#define WALLPAPER_MAX_PIXELS (1600u * 1600u)
 #define MODE_NORMAL 0u
 #define MODE_MAXIMIZED 1u
 #define MODE_FULLSCREEN 2u
@@ -141,6 +154,8 @@ static uint32_t cursor_pack = MOSDESK_CURSOR_PACK_POSY;
 static uint32_t mouse_speed = 100u;
 static uint32_t accent_color = 0xFF3DAEE9u;
 static uint32_t wallpaper_style;
+static uint32_t wallpaper_mode;
+static uint32_t wallpaper_rotation;
 static uint32_t painted_wallpaper_style = UINT32_MAX;
 static uint32_t auth_state;
 static mosdesk_settings_t desktop_settings;
@@ -155,15 +170,27 @@ static uint32_t drag_start_width;
 static uint32_t drag_start_height;
 static uint32_t drag_start_window_x;
 static uint32_t drag_start_window_y;
+static uint32_t desktop_icon_drag_index = UINT32_MAX;
+static int32_t desktop_icon_drag_start_x;
+static int32_t desktop_icon_drag_start_y;
+static int32_t desktop_icon_drag_origin_x;
+static int32_t desktop_icon_drag_origin_y;
+static uint32_t desktop_icon_saved_x;
+static uint32_t desktop_icon_saved_y;
+static bool desktop_icon_drag_moved;
 static uint8_t previous_buttons;
 static bool start_menu_open;
 static char status_message[64];
 static bool screen_owned;
 static uint32_t settings_poll_frames;
 static uint32_t icon_poll_frames;
+static uint32_t* wallpaper_source;
+static uint32_t wallpaper_source_width;
+static uint32_t wallpaper_source_height;
 
 static uint8_t* wm_read_file(const char* path, size_t max_size, size_t* size);
 static void paint_wallpaper(uint32_t* target);
+static void load_wallpaper_image(const char* path);
 static void log_message(const char* message);
 static void browser_close(void);
 static void browser_open(const char* path);
@@ -192,6 +219,14 @@ static void wm_free(void* pointer) {
 
 static void load_desktop_settings(void) {
     mosdesk_settings_t settings = mosdesk_settings_load();
+    bool wallpaper_changed = strcmp(settings.wallpaper_path,
+                                     desktop_settings.wallpaper_path) != 0;
+    if (wallpaper_changed)
+        load_wallpaper_image(settings.wallpaper_path);
+    if (wallpaper_changed || settings.wallpaper != desktop_settings.wallpaper ||
+        settings.wallpaper_mode != desktop_settings.wallpaper_mode ||
+        settings.wallpaper_rotation != desktop_settings.wallpaper_rotation)
+        painted_wallpaper_style = UINT32_MAX;
     desktop_settings = settings;
     mouse_speed = settings.mouse_speed;
     accent_color = settings.accent_color;
@@ -199,6 +234,8 @@ static void load_desktop_settings(void) {
     cursor_scale = settings.cursor_scale;
     cursor_pack = settings.cursor_pack;
     wallpaper_style = settings.wallpaper;
+    wallpaper_mode = settings.wallpaper_mode;
+    wallpaper_rotation = settings.wallpaper_rotation;
 }
 
 static uint16_t read_u16le(const uint8_t* bytes) {
@@ -516,6 +553,125 @@ static uint8_t* wm_read_file(const char* path, size_t max_size, size_t* size) {
     }
     *size = total;
     return data;
+}
+
+static uint32_t read_u32be(const uint8_t* bytes) {
+    return ((uint32_t)bytes[0] << 24u) | ((uint32_t)bytes[1] << 16u) |
+           ((uint32_t)bytes[2] << 8u) | (uint32_t)bytes[3];
+}
+
+static void load_wallpaper_image(const char* path) {
+    wm_free(wallpaper_source);
+    wallpaper_source = NULL;
+    wallpaper_source_width = 0;
+    wallpaper_source_height = 0;
+    if (!path[0]) return;
+
+    size_t file_size = 0;
+    uint8_t* data = wm_read_file(path, WALLPAPER_MAX_FILE_SIZE, &file_size);
+    if (!data || file_size < 22u || memcmp(data, "qoif", 4u) != 0) {
+        wm_free(data);
+        strcpy(status_message, "Wallpaper image could not be loaded");
+        return;
+    }
+    uint32_t width = read_u32be(data + 4u);
+    uint32_t height = read_u32be(data + 8u);
+    if (!width || !height || width > 1600u || height > 1600u ||
+        (uint64_t)width * height > WALLPAPER_MAX_PIXELS ||
+        (data[12] != 3u && data[12] != 4u) || data[13] > 1u ||
+        memcmp(data + file_size - 8u, "\0\0\0\0\0\0\0\1", 8u) != 0) {
+        wm_free(data);
+        strcpy(status_message, "Wallpaper image dimensions are invalid");
+        return;
+    }
+
+    size_t pixel_count = (size_t)width * height;
+    uint32_t* pixels = (uint32_t*)wm_malloc(pixel_count * sizeof(uint32_t));
+    if (!pixels) {
+        wm_free(data);
+        strcpy(status_message, "Not enough memory for wallpaper image");
+        return;
+    }
+    uint32_t index[64] = {0};
+    uint8_t red = 0, green = 0, blue = 0, alpha = 255, run = 0;
+    size_t offset = 14u;
+    size_t data_end = file_size - 8u;
+    size_t output = 0;
+    bool valid = true;
+    while (output < pixel_count) {
+        if (run) {
+            run--;
+        } else {
+            if (offset >= data_end) {
+                valid = false;
+                break;
+            }
+            uint8_t tag = data[offset++];
+            if (tag == 0xFEu) {
+                if (data_end - offset < 3u) {
+                    valid = false;
+                    break;
+                }
+                red = data[offset++];
+                green = data[offset++];
+                blue = data[offset++];
+            } else if (tag == 0xFFu) {
+                if (data_end - offset < 4u) {
+                    valid = false;
+                    break;
+                }
+                red = data[offset++];
+                green = data[offset++];
+                blue = data[offset++];
+                alpha = data[offset++];
+            } else if ((tag & 0xC0u) == 0x00u) {
+                uint32_t pixel = index[tag & 0x3Fu];
+                red = (uint8_t)(pixel >> 24u);
+                green = (uint8_t)(pixel >> 16u);
+                blue = (uint8_t)(pixel >> 8u);
+                alpha = (uint8_t)pixel;
+            } else if ((tag & 0xC0u) == 0x40u) {
+                red = (uint8_t)(red + ((tag >> 4u) & 3u) - 2u);
+                green = (uint8_t)(green + ((tag >> 2u) & 3u) - 2u);
+                blue = (uint8_t)(blue + (tag & 3u) - 2u);
+            } else if ((tag & 0xC0u) == 0x80u) {
+                if (offset >= data_end) {
+                    valid = false;
+                    break;
+                }
+                int32_t dg = (tag & 0x3Fu) - 32;
+                uint8_t second = data[offset++];
+                int32_t dr = dg + ((second >> 4u) & 0x0Fu) - 8;
+                int32_t db = dg + (second & 0x0Fu) - 8;
+                red = (uint8_t)(red + dr);
+                green = (uint8_t)(green + dg);
+                blue = (uint8_t)(blue + db);
+            } else {
+                run = tag & 0x3Fu;
+                if (run > pixel_count - output - 1u) {
+                    valid = false;
+                    break;
+                }
+            }
+        }
+        uint32_t pixel = (uint32_t)red << 24u |
+                         (uint32_t)green << 16u |
+                         (uint32_t)blue << 8u | alpha;
+        pixels[output++] = pixel;
+        uint32_t slot = (red * 3u + green * 5u + blue * 7u +
+                         alpha * 11u) % 64u;
+        index[slot] = pixel;
+    }
+    wm_free(data);
+    if (!valid || output != pixel_count) {
+        wm_free(pixels);
+        strcpy(status_message, "Wallpaper image data is invalid");
+        return;
+    }
+    wallpaper_source = pixels;
+    wallpaper_source_width = width;
+    wallpaper_source_height = height;
+    status_message[0] = '\0';
 }
 
 static bool wm_read_exact(uint64_t fd, void* output, size_t size) {
@@ -1002,6 +1158,60 @@ static void browser_close(void) {
     last_click_valid = false;
 }
 
+static bool browser_save_wallpaper_settings(const mosdesk_settings_t* next) {
+    if (!mosdesk_settings_save(next)) {
+        strcpy(browser_message, "Unable to save wallpaper settings");
+        return false;
+    }
+    desktop_settings = *next;
+    wallpaper_style = next->wallpaper;
+    wallpaper_mode = next->wallpaper_mode;
+    wallpaper_rotation = next->wallpaper_rotation;
+    painted_wallpaper_style = UINT32_MAX;
+    strcpy(browser_message, "Wallpaper settings saved");
+    return true;
+}
+
+static void browser_use_selected_wallpaper(void) {
+    if (browser_selected >= browser_entry_count ||
+        browser_entries[browser_selected].type != SYSCALL_DIRENT_TYPE_FILE) {
+        strcpy(browser_message, "Select an image first");
+        return;
+    }
+    const char* name = browser_entries[browser_selected].name;
+    size_t length = strlen(name);
+    if (length < 5u || strcmp(name + length - 4u, ".qoi")) {
+        strcpy(browser_message, "Select a QOI wallpaper image");
+        return;
+    }
+    char path[MOSDESK_WALLPAPER_PATH_SIZE];
+    if (!path_join(path, sizeof(path), browser_path, name)) {
+        strcpy(browser_message, "Wallpaper path is too long");
+        return;
+    }
+    mosdesk_settings_t next = desktop_settings;
+    memcpy(next.wallpaper_path, path, strlen(path) + 1u);
+    if (browser_save_wallpaper_settings(&next) &&
+        desktop_settings.wallpaper_path[0]) {
+        load_wallpaper_image(desktop_settings.wallpaper_path);
+        if (!wallpaper_source)
+            strcpy(browser_message, "Wallpaper image could not be loaded");
+    }
+}
+
+static void browser_set_wallpaper_option(uint32_t option) {
+    mosdesk_settings_t next = desktop_settings;
+    if (option == 0u)
+        next.wallpaper_mode = MOSDESK_WALLPAPER_FILL;
+    else if (option == 1u)
+        next.wallpaper_mode = MOSDESK_WALLPAPER_CROP;
+    else if (option == 2u)
+        next.wallpaper_mode = MOSDESK_WALLPAPER_STRETCH;
+    else
+        next.wallpaper_rotation++;
+    browser_save_wallpaper_settings(&next);
+}
+
 static void browser_open(const char* path) {
     if (!path || strlen(path) >= sizeof(browser_path) ||
         mos_syscall3(SYS_IS_DIR, (uint64_t)(uintptr_t)path, 0, 0) != 1u) {
@@ -1111,7 +1321,8 @@ static void browser_render(void) {
               0xFFF3F5F6u);
     fill_rect(0, 0, (int32_t)browser_width, 44, 0xFFE6EAEDu);
     fill_rect(0, 43, (int32_t)browser_width, 1, 0xFFD2D9DEu);
-    static const char* const controls[] = {"Home", "System", "Up", "Refresh"};
+    static const char* const controls[] = {
+        "Home", "System", "Up", "Refresh"};
     static const uint32_t control_x[] = {8u, 76u, 144u, 212u};
     for (uint32_t i = 0; i < 4u; i++) {
         fill_rect((int32_t)control_x[i], 7, 62, 29,
@@ -1119,20 +1330,37 @@ static void browser_render(void) {
         wm_text((int32_t)control_x[i] + 8, 15, controls[i],
                 0xFF34434Cu, 0, 1u);
     }
+    static const char* const wallpaper_controls[] = {
+        "Gallery", "Fill", "Crop", "Stretch", "Rotate"};
+    uint32_t button_width = browser_width > 248u
+        ? (browser_width - 48u) / 5u : 40u;
+    for (uint32_t i = 0; i < 5u; i++) {
+        int32_t x = 8 + (int32_t)i * ((int32_t)button_width + 8);
+        uint32_t selected = i == 1u
+            ? wallpaper_mode == MOSDESK_WALLPAPER_FILL
+            : i == 2u ? wallpaper_mode == MOSDESK_WALLPAPER_CROP
+            : i == 3u ? wallpaper_mode == MOSDESK_WALLPAPER_STRETCH : false;
+        fill_rect(x, 45, (int32_t)button_width, 25,
+                  selected ? accent_color : 0xFFD4E4EFu);
+        int32_t text_x = x + ((int32_t)button_width -
+            (int32_t)moswm_text_width(wallpaper_controls[i], 1u)) / 2;
+        wm_text(text_x, 52, wallpaper_controls[i],
+                selected ? 0xFFFFFFFFu : 0xFF34434Cu, 0, 1u);
+    }
     char display_path[BROWSER_PATH_SIZE];
     fit_text_px(display_path, sizeof(display_path), browser_path,
                 (int32_t)browser_width - 24, 1u);
-    wm_text(12, 52, display_path, 0xFF34434Cu, 0, 1u);
-    fill_rect(8, 70, (int32_t)browser_width - 16, 1, 0xFFD2D9DEu);
+    wm_text(12, 78, display_path, 0xFF34434Cu, 0, 1u);
+    fill_rect(8, 96, (int32_t)browser_width - 16, 1, 0xFFD2D9DEu);
 
-    uint32_t visible_rows = browser_height > 80u
-        ? (browser_height - 80u) / BROWSER_ROW_HEIGHT : 0u;
+    uint32_t visible_rows = browser_height > 106u
+        ? (browser_height - 106u) / BROWSER_ROW_HEIGHT : 0u;
     if (browser_scroll > browser_entry_count)
         browser_scroll = browser_entry_count;
     for (uint32_t row = 0; row < visible_rows; row++) {
         uint32_t index = browser_scroll + row;
         if (index >= browser_entry_count) break;
-        int32_t y = 76 + (int32_t)row * (int32_t)BROWSER_ROW_HEIGHT;
+        int32_t y = 102 + (int32_t)row * (int32_t)BROWSER_ROW_HEIGHT;
         if (browser_selected == index)
             fill_rect(8, y, (int32_t)browser_width - 16,
                       (int32_t)BROWSER_ROW_HEIGHT, 0xFFD4E4EFu);
@@ -1141,6 +1369,10 @@ static void browser_render(void) {
                 ? MOSWM_ICON_FOLDER : MOSWM_ICON_DOCUMENT;
         if (browser_entries[index].type == SYSCALL_DIRENT_TYPE_EXECUTABLE)
             icon = MOSWM_ICON_CODE;
+        size_t name_length = strlen(browser_entries[index].name);
+        if (name_length >= 4u &&
+            !strcmp(browser_entries[index].name + name_length - 4u, ".qoi"))
+            icon = MOSWM_ICON_IMAGE;
         moswm_draw_file_icon_sized(browser_pixels, browser_width,
             browser_height, 14, y + 4, icon, 20u);
         char label[SYSCALL_DIRENT_NAME_SIZE];
@@ -1182,14 +1414,29 @@ static void browser_mouse_down(int32_t x, int32_t y,
             browser_refresh_directory();
         return;
     }
-    if (y < 76) {
+    if (y >= 45 && y < 72) {
+        last_click_valid = false;
+        uint32_t width = info->width > 248u
+            ? (info->width - 48u) / 5u : 40u;
+        uint32_t index = x >= 8
+            ? (uint32_t)(x - 8) / (width + 8u) : UINT32_MAX;
+        if (index > 4u || x >= 8 + (int32_t)index *
+                ((int32_t)width + 8) + (int32_t)width)
+            return;
+        if (index == 0u)
+            browser_open("0:/programs/mosWM/assets/wallpapers");
+        else
+            browser_set_wallpaper_option(index - 1u);
+        return;
+    }
+    if (y < 102) {
         last_click_valid = false;
         return;
     }
-    uint32_t row = (uint32_t)(y - 76) / BROWSER_ROW_HEIGHT;
+    uint32_t row = (uint32_t)(y - 102) / BROWSER_ROW_HEIGHT;
     uint32_t index = browser_scroll + row;
-    uint32_t visible_rows = info->height > 80u
-        ? (info->height - 80u) / BROWSER_ROW_HEIGHT : 0u;
+    uint32_t visible_rows = info->height > 106u
+        ? (info->height - 106u) / BROWSER_ROW_HEIGHT : 0u;
     if (row >= visible_rows || index >= browser_entry_count) return;
     browser_selected = index;
     char entry_path[BROWSER_PATH_SIZE];
@@ -1238,6 +1485,12 @@ static void activate_pending_click(uint32_t time_ms) {
             const char* name = path;
             for (const char* cursor = path; *cursor; cursor++)
                 if (*cursor == '/') name = cursor + 1;
+            size_t name_length = strlen(name);
+            if (name_length >= 4u &&
+                !strcmp(name + name_length - 4u, ".qoi")) {
+                browser_use_selected_wallpaper();
+                return;
+            }
             bool runnable = is_run_name(name);
             for (uint32_t i = 0; i < browser_entry_count; i++) {
                 char entry_path[BROWSER_PATH_SIZE];
@@ -1306,6 +1559,66 @@ static uint32_t lerp_channel(uint32_t from, uint32_t to, uint32_t t) {
     return (from * (255u - t) + to * t) / 255u;
 }
 
+static void paint_image_wallpaper(uint32_t* target) {
+    uint32_t screen_width = display.width;
+    uint32_t screen_height = display.height;
+    uint32_t rotation = wallpaper_rotation % 4u;
+    uint32_t rotated_width = rotation & 1u
+        ? wallpaper_source_height : wallpaper_source_width;
+    uint32_t rotated_height = rotation & 1u
+        ? wallpaper_source_width : wallpaper_source_height;
+    int32_t output_width = (int32_t)screen_width;
+    int32_t output_height = (int32_t)screen_height;
+    if (wallpaper_mode != MOSDESK_WALLPAPER_STRETCH) {
+        bool screen_narrower = (uint64_t)screen_width * rotated_height <=
+                               (uint64_t)screen_height * rotated_width;
+        bool use_width = wallpaper_mode == MOSDESK_WALLPAPER_FILL
+            ? screen_narrower : !screen_narrower;
+        if (use_width) {
+            output_width = (int32_t)screen_width;
+            output_height = (int32_t)((uint64_t)screen_width *
+                rotated_height / rotated_width);
+        } else {
+            output_height = (int32_t)screen_height;
+            output_width = (int32_t)((uint64_t)screen_height *
+                rotated_width / rotated_height);
+        }
+    }
+    int32_t offset_x = ((int32_t)screen_width - output_width) / 2;
+    int32_t offset_y = ((int32_t)screen_height - output_height) / 2;
+    size_t screen_pixels = (size_t)screen_width * screen_height;
+    for (size_t i = 0; i < screen_pixels; i++) target[i] = 0xFF11191Eu;
+    for (int32_t y = 0; y < (int32_t)screen_height; y++) {
+        int32_t mapped_y = y - offset_y;
+        if (mapped_y < 0 || mapped_y >= output_height) continue;
+        uint32_t rotated_y = (uint32_t)((uint64_t)mapped_y *
+                                        rotated_height / output_height);
+        for (int32_t x = 0; x < (int32_t)screen_width; x++) {
+            int32_t mapped_x = x - offset_x;
+            if (mapped_x < 0 || mapped_x >= output_width) continue;
+            uint32_t rotated_x = (uint32_t)((uint64_t)mapped_x *
+                                            rotated_width / output_width);
+            uint32_t source_x, source_y;
+            if (rotation == 1u) {
+                source_x = rotated_y;
+                source_y = wallpaper_source_height - 1u - rotated_x;
+            } else if (rotation == 2u) {
+                source_x = wallpaper_source_width - 1u - rotated_x;
+                source_y = wallpaper_source_height - 1u - rotated_y;
+            } else if (rotation == 3u) {
+                source_x = wallpaper_source_width - 1u - rotated_y;
+                source_y = rotated_x;
+            } else {
+                source_x = rotated_x;
+                source_y = rotated_y;
+            }
+            target[(size_t)y * screen_width + (uint32_t)x] =
+                wallpaper_source[(size_t)source_y * wallpaper_source_width +
+                                 source_x];
+        }
+    }
+}
+
 /* Anti-aliased thick line with round caps, written as max-coverage into an
  * 8-bit mask so crossing strokes never double-darken where they meet.
  * Coordinates are in mask space; half16 is half the stroke width in 1/16 px. */
@@ -1367,12 +1680,20 @@ static void paint_wallpaper(uint32_t* target) {
     uint32_t* saved = canvas;
     canvas = target;
     uint32_t w = display.width, h = display.height;
-    static const uint8_t colors[3][6] = {
+    if (wallpaper_source) {
+        paint_image_wallpaper(target);
+        canvas = saved;
+        return;
+    }
+    static const uint8_t colors[6][6] = {
         {9u, 20u, 38u, 31u, 104u, 158u},
         {7u, 27u, 31u, 20u, 111u, 105u},
-        {35u, 19u, 12u, 139u, 79u, 39u}
+        {35u, 19u, 12u, 139u, 79u, 39u},
+        {12u, 31u, 20u, 83u, 132u, 76u},
+        {37u, 17u, 25u, 166u, 72u, 104u},
+        {39u, 30u, 12u, 155u, 119u, 47u}
     };
-    const uint8_t* palette = colors[wallpaper_style <= 2u
+    const uint8_t* palette = colors[wallpaper_style <= 5u
         ? wallpaper_style : 0u];
 
     /* Diagonal glass gradients with Plasma-style angled light bands. */
@@ -1457,7 +1778,26 @@ static void draw_custom_icon(const uint32_t* icon, int32_t x, int32_t y,
     }
 }
 
-static void desktop_app_position(uint32_t index, int32_t* x, int32_t* y) {
+static void desktop_icon_position(uint32_t index, int32_t* x, int32_t* y) {
+    if (index >= MOSDESK_DESKTOP_ICON_COUNT) return;
+    if (desktop_settings.desktop_icon_x[index] != UINT32_MAX &&
+        desktop_settings.desktop_icon_y[index] != UINT32_MAX) {
+        uint32_t max_x = display.width > 84u ? display.width - 84u : 0u;
+        uint32_t work_height = display.height > TASKBAR_HEIGHT
+            ? display.height - TASKBAR_HEIGHT : 0u;
+        uint32_t max_y = work_height > 90u ? work_height - 90u : 0u;
+        uint32_t saved_x = desktop_settings.desktop_icon_x[index];
+        uint32_t saved_y = desktop_settings.desktop_icon_y[index];
+        *x = (int32_t)(saved_x > max_x ? max_x : saved_x);
+        *y = (int32_t)(saved_y > max_y ? max_y : saved_y);
+        return;
+    }
+    if (index < 2u) {
+        *x = 24;
+        *y = 14 + (int32_t)index * 98;
+        return;
+    }
+    index -= 2u;
     uint32_t columns = display.width > 112u
         ? (display.width - 112u) / 88u : 1u;
     uint32_t rows = display.height > TASKBAR_HEIGHT + 24u
@@ -1468,6 +1808,10 @@ static void desktop_app_position(uint32_t index, int32_t* x, int32_t* y) {
     uint32_t row = index % rows;
     *x = 112 + (int32_t)column * 88;
     *y = 14 + (int32_t)row * 98;
+}
+
+static void desktop_app_position(uint32_t index, int32_t* x, int32_t* y) {
+    desktop_icon_position(index + 2u, x, y);
 }
 
 static bool desktop_app_at(int32_t px, int32_t py, uint32_t* app_index) {
@@ -1485,9 +1829,12 @@ static bool desktop_app_at(int32_t px, int32_t py, uint32_t* app_index) {
 
 static click_action_t desktop_shortcut_at(int32_t px, int32_t py,
                                           uint32_t* app_index) {
-    if (px >= 8 && px < 104 && py >= 14 && py < 104)
+    int32_t x, y;
+    desktop_icon_position(0u, &x, &y);
+    if (px >= x - 16 && px < x + 80 && py >= y && py < y + 90)
         return CLICK_ACTION_HOME;
-    if (px >= 8 && px < 104 && py >= 112 && py < 202)
+    desktop_icon_position(1u, &x, &y);
+    if (px >= x - 16 && px < x + 80 && py >= y && py < y + 90)
         return CLICK_ACTION_SYSTEM;
     if (desktop_app_at(px, py, app_index))
         return CLICK_ACTION_APPLICATION;
@@ -1504,10 +1851,12 @@ static void draw_desktop_icons(void) {
     };
     for (uint32_t i = 0; i < sizeof(items) / sizeof(items[0]); i++)
     {
-        int32_t icon_y = 14 + (int32_t)i * 98;
+        int32_t icon_x, icon_y;
+        desktop_icon_position(i, &icon_x, &icon_y);
         moswm_draw_file_icon_sized(canvas, display.width, display.height,
-                                   24, icon_y, items[i].icon, 64u);
-        int32_t label_x = 56 - (int32_t)moswm_text_width(items[i].label, 2) / 2;
+                                   icon_x, icon_y, items[i].icon, 64u);
+        int32_t label_x = icon_x + 32 -
+            (int32_t)moswm_text_width(items[i].label, 2) / 2;
         if (label_x < 4) label_x = 4;
         wm_text(label_x, icon_y + 68, items[i].label, 0xFFF2F6F8u,
                 0x99000000u, 2);
@@ -2252,7 +2601,7 @@ static void update_cursor_appearance(syscall_window_info_t* windows,
     moswm_cursor_state_t cursor_state = {0};
     uint32_t status = SYSCALL_CURSOR_ARROW;
 
-    if (dragging_id) {
+    if (dragging_id || desktop_icon_drag_index != UINT32_MAX) {
         status = drag_mode == DRAG_RESIZE
             ? SYSCALL_CURSOR_RESIZE_NWSE : SYSCALL_CURSOR_MOVE;
         app_window = NULL;
@@ -2341,6 +2690,37 @@ static void start_move(syscall_window_info_t* info, bool resize) {
 
 static void move_dragged_window(syscall_window_info_t* windows,
                                 uint64_t count) {
+    if (desktop_icon_drag_index != UINT32_MAX) {
+        int32_t dx = cursor_x - desktop_icon_drag_start_x;
+        int32_t dy = cursor_y - desktop_icon_drag_start_y;
+        if (dx < -6 || dx > 6 || dy < -6 || dy > 6)
+            desktop_icon_drag_moved = true;
+        if (desktop_icon_drag_moved) {
+            int32_t x = desktop_icon_drag_origin_x + dx;
+            int32_t y = desktop_icon_drag_origin_y + dy;
+            int32_t max_x = (int32_t)display.width - 84;
+            int32_t max_y = (int32_t)display.height -
+                            (int32_t)TASKBAR_HEIGHT - 90;
+            if (max_x < 0) max_x = 0;
+            if (max_y < 0) max_y = 0;
+            if (x < 0) x = 0;
+            if (y < 0) y = 0;
+            if (x > max_x) x = max_x;
+            if (y > max_y) y = max_y;
+            if (desktop_settings.grid_enabled) {
+                if (x >= 24) x = 24 + ((x - 24 + 44) / 88) * 88;
+                else x = 24;
+                if (y >= 14) y = 14 + ((y - 14 + 49) / 98) * 98;
+                else y = 14;
+                if (x > max_x) x = max_x;
+                if (y > max_y) y = max_y;
+            }
+            desktop_settings.desktop_icon_x[desktop_icon_drag_index] =
+                (uint32_t)x;
+            desktop_settings.desktop_icon_y[desktop_icon_drag_index] =
+                (uint32_t)y;
+        }
+    }
     if (!dragging_id || drag_mode == DRAG_NONE) return;
     for (uint64_t i = 0; i < count; i++) {
         syscall_window_info_t* info = &windows[i];
@@ -2374,6 +2754,8 @@ static void move_dragged_window(syscall_window_info_t* windows,
 
 static void on_mouse_down(syscall_window_info_t* windows, uint64_t count) {
     pending_click_action = CLICK_ACTION_NONE;
+    desktop_icon_drag_index = UINT32_MAX;
+    desktop_icon_drag_moved = false;
     uint32_t taskbar_y = display.height - TASKBAR_HEIGHT;
     if (start_menu_open && cursor_x >= 12 && cursor_x < 298 &&
         cursor_y >= (int32_t)taskbar_y - 268 &&
@@ -2429,7 +2811,19 @@ static void on_mouse_down(syscall_window_info_t* windows, uint64_t count) {
             queue_open_click(action, desktop_apps[app_index].path);
         } else {
             last_click_valid = false;
+            return;
         }
+        desktop_icon_drag_index = action == CLICK_ACTION_HOME ? 0u
+            : action == CLICK_ACTION_SYSTEM ? 1u : app_index + 2u;
+        desktop_icon_drag_start_x = cursor_x;
+        desktop_icon_drag_start_y = cursor_y;
+        desktop_icon_position(desktop_icon_drag_index,
+                              &desktop_icon_drag_origin_x,
+                              &desktop_icon_drag_origin_y);
+        desktop_icon_saved_x =
+            desktop_settings.desktop_icon_x[desktop_icon_drag_index];
+        desktop_icon_saved_y =
+            desktop_settings.desktop_icon_y[desktop_icon_drag_index];
         return;
     }
     focus_window(info);
@@ -2467,6 +2861,18 @@ static void on_mouse_down(syscall_window_info_t* windows, uint64_t count) {
 
 static void on_mouse_up(syscall_window_info_t* windows, uint64_t count,
                         uint32_t time_ms) {
+    if (desktop_icon_drag_index != UINT32_MAX) {
+        if (desktop_icon_drag_moved &&
+            !mosdesk_settings_save(&desktop_settings)) {
+            desktop_settings.desktop_icon_x[desktop_icon_drag_index] =
+                desktop_icon_saved_x;
+            desktop_settings.desktop_icon_y[desktop_icon_drag_index] =
+                desktop_icon_saved_y;
+            strcpy(status_message, "Unable to save desktop icon position");
+        }
+        desktop_icon_drag_index = UINT32_MAX;
+        desktop_icon_drag_moved = false;
+    }
     if (pending_click_action != CLICK_ACTION_NONE) {
         int32_t dx = cursor_x - pending_click_x;
         int32_t dy = cursor_y - pending_click_y;
@@ -2618,8 +3024,8 @@ static void route_input(const syscall_input_event_t* input,
         syscall_window_info_t* under =
             window_at(windows, count, cursor_x, cursor_y);
         if (under && under->id == browser_window_id) {
-            uint32_t visible_rows = browser_height > 80u
-                ? (browser_height - 80u) / BROWSER_ROW_HEIGHT : 0u;
+            uint32_t visible_rows = browser_height > 106u
+                ? (browser_height - 106u) / BROWSER_ROW_HEIGHT : 0u;
             uint32_t max_scroll = browser_entry_count > visible_rows
                 ? browser_entry_count - visible_rows : 0u;
             if (input->wheel < 0 && browser_scroll < max_scroll)
@@ -2666,6 +3072,8 @@ static void cleanup(void) {
     canvas = NULL;
     wm_free(wallpaper);
     wallpaper = NULL;
+    wm_free(wallpaper_source);
+    wallpaper_source = NULL;
     wm_free(font_regular_data);
     font_regular_data = NULL;
     wm_free(font_medium_data);
@@ -2737,7 +3145,8 @@ int main(void) {
     for (;;) {
         bool refresh_icons = ++icon_poll_frames >= 30u;
         if (refresh_icons) icon_poll_frames = 0;
-        if (++settings_poll_frames >= 30u) {
+        if (++settings_poll_frames >= 30u &&
+            desktop_icon_drag_index == UINT32_MAX) {
             settings_poll_frames = 0;
             load_desktop_settings();
         }

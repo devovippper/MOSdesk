@@ -11,6 +11,8 @@ https://github.com/user-attachments/assets/bddd45a1-8dfb-4670-86b6-80896696b8b8
 ## Features
 
 - Composites desktop layers and window surfaces with dirty-rectangle updates
+- Keeps desktop shortcut positions across restarts, with optional grid snapping
+- Includes six coordinated color themes and eight photo wallpapers selectable in the File Browser, with fill, crop, stretch, and rotation controls
 - Renders smooth, anti-aliased OpenType/TrueType text (Inter, bundled) through the reusable `ttrend` / `ttrend_outline` libraries, with the bitmap font as a fallback
 - Produces SDK `.slib` bundles that can be consumed by other freestanding programs
 - Packages the desktop as a Minimal-OS deliver package (`.mpkg`) for installation
@@ -63,6 +65,21 @@ size; 64 is pixel-perfect and other sizes are area-averaged.
 python3 mosdesk/tools/icons/generate_icons.py   # regenerates the header, the
                                                 # SVG sprite and icons/pixel/*.png
 ```
+
+## Wallpapers
+
+The eight supplied JPEG sources live in `use/`; the packaged QOI versions are
+bounded to 1600 pixels on their longest edge for desktop rendering. To
+regenerate them after changing the source photos, install Pillow and run:
+
+```sh
+python3 -m pip install Pillow
+python3 mosWM/tools/generate_wallpapers.py
+```
+
+In MOSdesk, open System, choose Wallpapers in the File Browser, then
+double-click a photo to apply it. The File Browser toolbar selects fill, crop,
+stretch, and repeated 90-degree rotation.
 
 ## Cursor showcase
 

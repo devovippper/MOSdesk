@@ -1,3 +1,7 @@
 Cursor assets: Posy's Cursor by Michiel de Boer.
 Original source: https://www.michieldb.nl/other/cursors
 The supplied archive did not include redistribution license terms.
+
+Wallpaper photos supplied in use/ and bundled as QOI assets:
+Cristina Gottardi, Irina Iriser, John Towner, Jonatan Pie, Logan Voss,
+Marita Kavelashvili, Sebastian Unrau, and Sheng Li (Unsplash).

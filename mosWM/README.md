@@ -33,9 +33,11 @@ menu. Do not launch the legacy standalone framebuffer build alongside mosWM.
 
 The Posy cursor pack is the default; the previous single-pointer cursor is
 available as the Classic pack. MOSdesk Settings lets users choose the pack,
-fill color, scale, pointer speed, desktop accent, wallpaper, and optional
-password sign-in, and single-click opening. Single-click opening is off by
-default. On first launch mosWM creates `0:/users/` and asks whether to
+fill color, scale, pointer speed, one of six coordinated color themes, optional
+password sign-in, single-click opening, and desktop grid snapping. Desktop
+shortcut positions persist across restarts; the grid is on by default and can
+be disabled for free placement. Single-click opening and password sign-in are
+off by default. On first launch mosWM creates `0:/users/` and asks whether to
 use password sign-in or automatic sign-in. The password prompt gates MOSdesk
 only; it does not protect OS files or replace an OS account login. Posy's
 animated busy and working cursors and its text, hand, help, forbidden, move,
@@ -54,8 +56,11 @@ SDK README for the application API.
 Home opens the `0:/users/` folder and System opens the `0:/` filesystem root
 in the built-in File Browser. Navigate folders with a double-click (or one
 click when enabled), use the toolbar to jump Home/System, go up, or refresh,
-and open runnable `.run` files from the list. The Desktop section in MOSdesk
-Settings controls single-click opening; it is off by default.
+and open runnable `.run` files from the list. The Wallpapers action opens the
+bundled photo gallery; double-click a QOI image to apply it. The toolbar also
+selects fill, crop, or stretch and rotates the wallpaper 90 degrees per click.
+The Desktop section in MOSdesk Settings controls single-click opening and grid
+snapping.
 
 ## Window features
 
