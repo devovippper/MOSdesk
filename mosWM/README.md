@@ -33,9 +33,21 @@ menu. Do not launch the legacy standalone framebuffer build alongside mosWM.
 
 The Posy cursor pack is the default; the previous single-pointer cursor is
 available as the Classic pack. MOSdesk Settings lets users choose the pack,
-fill color, scale, pointer speed, and desktop accent. Posy's animated busy and
-working cursors and its text, hand, help, forbidden, move, pen, precise, and
-resize cursors are loaded as needed.
+fill color, scale, pointer speed, desktop accent, wallpaper, and optional
+password sign-in. On first launch mosWM creates `0:/users/` and asks whether to
+use password sign-in or automatic sign-in. The password prompt gates MOSdesk
+only; it does not protect OS files or replace an OS account login. Posy's
+animated busy and working cursors and its text, hand, help, forbidden, move,
+pen, precise, and resize cursors are loaded as needed.
+
+MOSdesk keeps the Home and System desktop shortcuts and adds shortcuts for
+`.run` applications found directly in `0:/programs/` or one directory below
+it. Clicking an application shortcut launches its `.run` bundle. Bundles may
+include a root-level `icon.bmp` or `icon.ico`; these are shown on the desktop.
+The decoder supports uncompressed 24-bit or 32-bit BMP and DIB-based ICO
+entries. Apps can set a 32×32 ARGB8888 icon for their own window with
+`mos_window_set_icon`; mosWM displays it in the title bar and taskbar. See the
+SDK README for the application API.
 
 ## Window features
 

@@ -19,7 +19,19 @@ if [ ! -f "$PACKAGE_TOOL" ]; then
 fi
 
 mkdir -p "$DIST" "$PACKAGE"
-"$SDK_BUILD" --output "$DIST/mosdesk.run" "$SCRIPT_DIR"
+BUILD_SOURCE=$(mktemp -d "$DIST/.mosdesk-build-source.XXXXXX")
+trap 'rm -rf "$BUILD_SOURCE"' EXIT HUP INT TERM
+mkdir -p "$BUILD_SOURCE/mosdesk" "$BUILD_SOURCE/mosWM" \
+    "$BUILD_SOURCE/Minimal-OS-SDK"
+cp "$SCRIPT_DIR/main.c" "$SCRIPT_DIR/settings.h" "$SCRIPT_DIR/input.h" \
+    "$SCRIPT_DIR/password_hash.c" "$SCRIPT_DIR/password_hash.h" \
+    "$BUILD_SOURCE/mosdesk/"
+cp -R "$SCRIPT_DIR/libraries" "$BUILD_SOURCE/mosdesk/libraries"
+cp "$PROJECT_ROOT/mosWM/file_icons.h" \
+    "$PROJECT_ROOT/mosWM/file_icon_data.h" "$BUILD_SOURCE/mosWM/"
+ln -s "$PROJECT_ROOT/Minimal-OS-SDK/libraries" \
+    "$BUILD_SOURCE/Minimal-OS-SDK/libraries"
+"$SDK_BUILD" --output "$DIST/mosdesk.run" "$BUILD_SOURCE/mosdesk"
 "$SDK_BUILD" --slib --output "$DIST/ttrend_raster.slib" \
     "$SCRIPT_DIR/libraries/ttrend_raster"
 "$SDK_BUILD" --slib --output "$DIST/ttrend_outline.slib" \

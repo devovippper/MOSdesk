@@ -99,6 +99,13 @@ Start menu and saves desktop preferences for future sessions. Its default
 pointer is the Posy cursor pack; the previous single-pointer cursor is
 available as Classic. Attribution is included in the package.
 
+On the first MOSdesk launch, mosWM creates `0:/users/` and shows a one-time
+setup asking whether to enable password sign-in. Choosing no enables automatic
+sign-in; choosing yes sets the desktop password. Password sign-in is a
+MOSdesk desktop gate, not an OS-level account or filesystem security boundary.
+Settings includes Appearance (accent and wallpaper), Mouse, Cursor, and Login
+pages.
+
 The standalone manager can also be started manually from the Minimal-OS
 terminal:
 
