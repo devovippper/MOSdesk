@@ -59,14 +59,14 @@
       left: 22px;
       display: grid;
       grid-auto-flow: column;
-      grid-template-rows: repeat(6, 82px);
+      grid-template-rows: repeat(5, 106px);
       grid-auto-columns: 90px;
       align-content: start;
       gap: 5px 3px;
     }
     .desktop-item {
       width: 86px;
-      min-height: 78px;
+      min-height: 100px;
       padding: 7px 4px 4px;
       display: flex;
       flex-direction: column;
@@ -82,7 +82,8 @@
       outline: 0;
       background: #b9ddf124;
     }
-    .file-icon { width: 42px; height: 42px; filter: drop-shadow(0 2px 2px #09131b70); }
+    .file-icon { width: 64px; height: 64px; image-rendering: pixelated; }
+    .task-app .file-icon, .menu-item .file-icon { image-rendering: auto; }
     .desktop-item span { max-width: 78px; color: #f3f7fa; font-size: 12px; line-height: 15px; text-shadow: 0 1px 3px #101c28; }
     .taskbar {
       position: absolute;
@@ -113,7 +114,7 @@
       border-bottom: 2px solid transparent !important;
     }
     .task-app:hover, .task-app[aria-current="true"] { background: #ffffff12; border-bottom-color: var(--accent) !important; }
-    .task-app .file-icon { width: 24px; height: 24px; }
+    .task-app .file-icon { width: 32px; height: 32px; }
     .tray { margin-left: auto; padding: 0 15px; display: flex; align-items: center; gap: 14px; color: #dce6eb; font-size: 12px; }
     .tray-network { width: 15px; height: 12px; border: 1px solid #c9d6dc; border-width: 1px 0 0; border-radius: 50% 50% 0 0; position: relative; }
     .tray-network::before { position: absolute; content: ""; left: 3px; top: 3px; width: 7px; height: 6px; border: 1px solid #c9d6dc; border-bottom: 0; border-radius: 8px 8px 0 0; }
@@ -139,7 +140,7 @@
     .menu-section { margin: 16px 0 6px; color: #a9b9c3; font-size: 10px; font-weight: 700; letter-spacing: .06em; }
     .menu-item { width: 100%; min-height: 42px; padding: 5px 8px; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; text-align: left; cursor: inherit; }
     .menu-item:hover { background: #ffffff13; }
-    .menu-item .file-icon { width: 27px; height: 27px; }
+    .menu-item .file-icon { width: 32px; height: 32px; }
     .settings-window {
       position: absolute;
       z-index: 3;
@@ -168,8 +169,8 @@
     .category-button { width: 100%; min-height: 38px; padding: 0 9px; display: flex; align-items: center; gap: 10px; border: 0; background: transparent; color: #35434c; text-align: left; cursor: inherit; }
     .category-button[aria-selected="true"] { background: #d2e4f0; box-shadow: inset 3px 0 var(--accent); }
     .category-button:hover { background: #dbe2e7; }
-    .category-symbol { width: 17px; height: 17px; display: inline-flex; flex: 0 0 17px; }
-    .category-symbol svg { width: 17px; height: 17px; }
+    .category-symbol { width: 28px; height: 28px; display: inline-flex; flex: 0 0 28px; }
+    .category-symbol svg { width: 28px; height: 28px; }
     .settings-content { padding: 28px 32px; overflow: auto; }
     .settings-content h3 { margin: 0 0 5px; font-size: 21px; font-weight: 550; }
     .settings-desc { margin: 0 0 26px; color: #64727b; font-size: 13px; }
@@ -187,9 +188,9 @@
     .preview-note { position: absolute; right: 10px; top: 8px; color: #d2dce2; font-size: 10px; opacity: .75; }
     [hidden] { display: none !important; }
     @media (max-width: 560px) {
-      .icon-grid { top: 14px; left: 10px; grid-template-rows: repeat(7, 72px); grid-auto-columns: 77px; gap: 2px 0; }
+      .icon-grid { top: 14px; left: 10px; grid-template-rows: repeat(7, 84px); grid-auto-columns: 77px; gap: 2px 0; }
       .desktop-item { width: 74px; min-height: 68px; }
-      .file-icon { width: 36px; height: 36px; }
+      .file-icon { width: 48px; height: 48px; }
       .desktop-item span { font-size: 11px; }
       .settings-layout { grid-template-columns: 116px 1fr; }
       .settings-nav { padding: 15px 6px; }

@@ -13,6 +13,8 @@
 #define SETTINGS_WIDTH 520u
 #define SETTINGS_HEIGHT 300u
 #define NAV_WIDTH 148u
+#define NAV_TOP 52
+#define NAV_PITCH 44
 
 typedef struct {
     uint32_t width;
@@ -160,21 +162,25 @@ static void draw_window(void) {
               0xFFE6EAEDu);
     fill_rect((int32_t)NAV_WIDTH, 0, 1, (int32_t)surface.height,
               0xFFD2D9DEu);
-    fill_rect(14, 52 + (int32_t)category * 38, 120, 31, 0xFFD4E4EFu);
-    fill_rect(14, 52 + (int32_t)category * 38, 3, 31,
+    fill_rect(10, NAV_TOP + (int32_t)category * NAV_PITCH, 128, NAV_PITCH - 4,
+              0xFFD4E4EFu);
+    fill_rect(10, NAV_TOP + (int32_t)category * NAV_PITCH, 3, NAV_PITCH - 4,
               preferences.accent_color);
     fill_rect((int32_t)NAV_WIDTH + 14, 42,
               (int32_t)surface.width - (int32_t)NAV_WIDTH - 28,
               1, 0xFFD2D9DEu);
 
     draw_text(16, 15, "MOSdesk Settings", 0xFF273640u, true);
-    moswm_draw_file_icon(surface.pixels, surface.width, surface.height,
-                         20, 56, MOSWM_ICON_SETTINGS);
-    draw_cursor_icon(27, 98, 1u, 0xFF34434Cu);
-    draw_cursor_icon(27, 136, 1u, 0xFF34434Cu);
-    draw_text(54, 65, "Appearance", 0xFF34434Cu, false);
-    draw_text(54, 103, "Mouse", 0xFF34434Cu, false);
-    draw_text(54, 141, "Cursor", 0xFF34434Cu, false);
+    static const moswm_file_icon_t nav_icons[3] = {
+        MOSWM_ICON_APPEARANCE, MOSWM_ICON_MOUSE, MOSWM_ICON_POINTER};
+    static const char* const nav_names[3] = {"Appearance", "Mouse", "Cursor"};
+    for (int32_t i = 0; i < 3; i++) {
+        int32_t row = NAV_TOP + i * NAV_PITCH;
+        moswm_draw_file_icon_sized(surface.pixels, surface.width,
+                                   surface.height, 18, row + 3,
+                                   nav_icons[i], 32u);
+        draw_text(58, row + 15, nav_names[i], 0xFF34434Cu, false);
+    }
 
     if (category == 0u) {
         for (uint32_t i = 0; i < 3; i++) {
@@ -230,10 +236,9 @@ static void handle_mouse(const syscall_window_event_t* event) {
     int32_t x = event->x;
     int32_t y = event->y;
     if (x < (int32_t)NAV_WIDTH) {
-        if (y >= 52 && y < 90) category = 0;
-        else if (y >= 90 && y < 128) category = 1;
-        else if (y >= 128 && y < 166) category = 2;
-        else return;
+        int32_t row = (y - NAV_TOP) / NAV_PITCH;
+        if (y < NAV_TOP || row < 0 || row > 2) return;
+        category = (uint32_t)row;
     } else if (category == 0u && y >= 92 && y < 132) {
         int32_t index = (x - (int32_t)NAV_WIDTH - 22) / 50;
         if (index < 0 || index >= 3) return;

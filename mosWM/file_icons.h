@@ -1,8 +1,15 @@
 #ifndef MOSWM_FILE_ICONS_H
 #define MOSWM_FILE_ICONS_H
 
+/* MOSdesk icon set: 64x64 pixel-art icons (see mosdesk/tools/icons/).
+ * The art lives in file_icon_data.h as a palette + run-length encoding and is
+ * decoded on demand; any size can be requested, 64 is pixel-perfect and the
+ * other sizes are area-averaged from the 64x64 source. */
+
 #include <stddef.h>
 #include <stdint.h>
+
+#include "file_icon_data.h"
 
 typedef enum {
     MOSWM_ICON_FOLDER,
@@ -16,8 +23,17 @@ typedef enum {
     MOSWM_ICON_ARCHIVE,
     MOSWM_ICON_SETTINGS,
     MOSWM_ICON_NETWORK,
-    MOSWM_ICON_POINTER
+    MOSWM_ICON_POINTER,
+    MOSWM_ICON_HOME,
+    MOSWM_ICON_COMPUTER,
+    MOSWM_ICON_APPEARANCE,
+    MOSWM_ICON_MOUSE,
+    MOSWM_ICON_COUNT
 } moswm_file_icon_t;
+
+#define MOSWM_ICON_SOURCE_SIZE 64
+
+static uint32_t moswm_icon_scratch[MOSWM_ICON_SOURCE_SIZE * MOSWM_ICON_SOURCE_SIZE];
 
 static void moswm_icon_pixel(uint32_t* pixels, uint32_t surface_width,
                              uint32_t surface_height, int32_t x, int32_t y,
@@ -51,156 +67,71 @@ static void moswm_icon_rect(uint32_t* pixels, uint32_t surface_width,
                              x + column, y + row, color);
 }
 
+static void moswm_icon_decode(moswm_file_icon_t type, uint32_t* out) {
+    if ((unsigned)type >= MOSWM_ICON_COUNT) type = MOSWM_ICON_DOCUMENT;
+    const uint32_t* palette = moswm_icon_table[type].palette;
+    const uint8_t* runs = moswm_icon_table[type].runs;
+    uint32_t bytes = moswm_icon_table[type].run_bytes;
+    uint32_t at = 0;
+    for (uint32_t i = 0; i + 1u < bytes && at < MOSWM_ICON_SOURCE_SIZE *
+                                                 MOSWM_ICON_SOURCE_SIZE; i += 2u) {
+        uint32_t color = palette[runs[i + 1u]];
+        for (uint32_t n = runs[i]; n && at < MOSWM_ICON_SOURCE_SIZE *
+                                              MOSWM_ICON_SOURCE_SIZE; n--)
+            out[at++] = color;
+    }
+    while (at < MOSWM_ICON_SOURCE_SIZE * MOSWM_ICON_SOURCE_SIZE) out[at++] = 0;
+}
+
+/* Draws icon `type` into a size x size box whose top-left is (x, y). */
+static void moswm_draw_file_icon_sized(uint32_t* pixels, uint32_t surface_width,
+                                       uint32_t surface_height, int32_t x,
+                                       int32_t y, moswm_file_icon_t type,
+                                       uint32_t size) {
+    if (!size) return;
+    moswm_icon_decode(type, moswm_icon_scratch);
+    const uint32_t src = MOSWM_ICON_SOURCE_SIZE;
+    for (uint32_t dy = 0; dy < size; dy++) {
+        uint32_t y0 = dy * src / size;
+        uint32_t y1 = (dy + 1u) * src / size;
+        if (y1 <= y0) y1 = y0 + 1u;
+        for (uint32_t dx = 0; dx < size; dx++) {
+            uint32_t x0 = dx * src / size;
+            uint32_t x1 = (dx + 1u) * src / size;
+            if (x1 <= x0) x1 = x0 + 1u;
+            uint32_t color;
+            if (size == src) {
+                color = moswm_icon_scratch[dy * src + dx];
+            } else {
+                /* premultiplied box average */
+                uint32_t a = 0, r = 0, g = 0, b = 0, n = 0;
+                for (uint32_t sy = y0; sy < y1; sy++)
+                    for (uint32_t sx = x0; sx < x1; sx++) {
+                        uint32_t c = moswm_icon_scratch[sy * src + sx];
+                        uint32_t ca = c >> 24u;
+                        a += ca;
+                        r += ((c >> 16u) & 255u) * ca;
+                        g += ((c >> 8u) & 255u) * ca;
+                        b += (c & 255u) * ca;
+                        n++;
+                    }
+                if (!a) continue;
+                color = ((a / n) << 24u) | ((r / a) << 16u) |
+                        ((g / a) << 8u) | (b / a);
+            }
+            if (color >> 24u)
+                moswm_icon_pixel(pixels, surface_width, surface_height,
+                                 x + (int32_t)dx, y + (int32_t)dy, color);
+        }
+    }
+}
+
+/* Convenience: the classic 32x32 footprint. */
 static void moswm_draw_file_icon(uint32_t* pixels, uint32_t surface_width,
                                  uint32_t surface_height, int32_t x, int32_t y,
                                  moswm_file_icon_t type) {
-    const uint32_t paper = 0xFFF2F5F6u;
-    const uint32_t ink = 0xFF61727Du;
-    switch (type) {
-    case MOSWM_ICON_FOLDER:
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 2, y + 7,
-                        17, 6, 0xFFE7B65Fu);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 2, y + 11,
-                        28, 17, 0xFFE5AE4Fu);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 4, y + 14,
-                        24, 11, 0xFFF3C971);
-        break;
-    case MOSWM_ICON_DRIVE:
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 3, y + 6,
-                        27, 18, 0xFF9AAAB3u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 5, y + 8,
-                        23, 11, 0xFFDCE4E8u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 2, y + 24,
-                        29, 5, 0xFF70828Cu);
-        moswm_icon_pixel(pixels, surface_width, surface_height,
-                         x + 25, y + 26, 0xFF63C49Bu);
-        break;
-    case MOSWM_ICON_IMAGE:
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 3, y + 4,
-                        26, 24, paper);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 6, y + 20,
-                        20, 5, 0xFF69A995u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 9, y + 16,
-                        6, 6, 0xFF69A995u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 17, y + 14,
-                        8, 8, 0xFF69A995u);
-        moswm_icon_pixel(pixels, surface_width, surface_height,
-                         x + 10, y + 10, 0xFFE6B75Fu);
-        break;
-    case MOSWM_ICON_AUDIO:
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 17, y + 4,
-                        3, 18, 0xFF558EC0u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 19, y + 5,
-                        10, 3, 0xFF558EC0u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 14, y + 20,
-                        6, 4, 0xFF558EC0u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 23, y + 17,
-                        6, 4, 0xFF558EC0u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 12, y + 22,
-                        6, 5, 0xFF558EC0u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 21, y + 19,
-                        6, 5, 0xFF558EC0u);
-        break;
-    case MOSWM_ICON_VIDEO:
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 2, y + 7,
-                        28, 20, 0xFF586F8Fu);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 13, y + 11,
-                        3, 12, paper);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 16, y + 13,
-                        3, 8, paper);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 19, y + 15,
-                        3, 4, paper);
-        break;
-    case MOSWM_ICON_CODE:
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 2, y + 5,
-                        28, 22, 0xFF293B4Du);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 2, y + 5,
-                        28, 4, 0xFF526879u);
-        moswm_icon_pixel(pixels, surface_width, surface_height,
-                         x + 7, y + 15, 0xFF79B9D5u);
-        moswm_icon_pixel(pixels, surface_width, surface_height,
-                         x + 6, y + 16, 0xFF79B9D5u);
-        moswm_icon_pixel(pixels, surface_width, surface_height,
-                         x + 7, y + 17, 0xFF79B9D5u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 14, y + 14,
-                        2, 3, 0xFFE3B96Cu);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 19, y + 14,
-                        2, 3, 0xFF79B9D5u);
-        break;
-    case MOSWM_ICON_ARCHIVE:
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 5, y + 5,
-                        22, 24, 0xFFB98552u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 3, y + 3,
-                        26, 6, 0xFFD7A46Au);
-        for (int32_t row = 10; row < 24; row += 5)
-            moswm_icon_rect(pixels, surface_width, surface_height, x + 14,
-                            y + row, 5, 3, 0xFF715338u);
-        break;
-    case MOSWM_ICON_SETTINGS:
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 6, y + 6,
-                        20, 20, 0xFF81939Eu);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 12, y + 12,
-                        8, 8, 0xFFF2F5F6u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 15, y + 15,
-                        2, 2, 0xFF81939Eu);
-        break;
-    case MOSWM_ICON_NETWORK:
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 15, y + 6,
-                        2, 17, 0xFF6E9CAFu);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 6, y + 23,
-                        20, 2, 0xFF6E9CAFu);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 9, y + 14,
-                        2, 10, 0xFF6E9CAFu);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 22, y + 14,
-                        2, 10, 0xFF6E9CAFu);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 12, y + 4,
-                        8, 7, 0xFFDCE5E9u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 3, y + 23,
-                        8, 7, 0xFFDCE5E9u);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 20, y + 23,
-                        8, 7, 0xFFDCE5E9u);
-        break;
-    case MOSWM_ICON_POINTER:
-        for (int32_t row = 0; row < 24; row++) {
-            int32_t end = row / 2 + 2;
-            if (end > 13) end = 13;
-            moswm_icon_rect(pixels, surface_width, surface_height,
-                x + 7, y + 3 + row, end, 1, 0xFF243640u);
-            if (row > 0 && row < 22)
-                moswm_icon_rect(pixels, surface_width, surface_height,
-                    x + 8, y + 4 + row, end - 2, 1, 0xFFF5F7F8u);
-        }
-        moswm_icon_rect(pixels, surface_width, surface_height,
-            x + 18, y + 21, 4, 2, 0xFF243640u);
-        moswm_icon_rect(pixels, surface_width, surface_height,
-            x + 19, y + 23, 5, 2, 0xFF243640u);
-        break;
-    case MOSWM_ICON_PDF:
-    case MOSWM_ICON_DOCUMENT:
-    default:
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 6, y + 3,
-                        18, 26, paper);
-        moswm_icon_rect(pixels, surface_width, surface_height, x + 18, y + 3,
-                        6, 6, 0xFFDCE5E9u);
-        if (type == MOSWM_ICON_PDF) {
-            moswm_icon_rect(pixels, surface_width, surface_height, x + 6,
-                            y + 17, 18, 8, 0xFFC34F52u);
-            moswm_icon_rect(pixels, surface_width, surface_height, x + 9,
-                            y + 19, 2, 4, paper);
-            moswm_icon_rect(pixels, surface_width, surface_height, x + 14,
-                            y + 19, 2, 4, paper);
-            moswm_icon_rect(pixels, surface_width, surface_height, x + 19,
-                            y + 19, 2, 4, paper);
-        } else {
-            moswm_icon_rect(pixels, surface_width, surface_height, x + 9, y + 13,
-                            12, 1, ink);
-            moswm_icon_rect(pixels, surface_width, surface_height, x + 9, y + 17,
-                            12, 1, ink);
-            moswm_icon_rect(pixels, surface_width, surface_height, x + 9, y + 21,
-                            9, 1, ink);
-        }
-        break;
-    }
+    moswm_draw_file_icon_sized(pixels, surface_width, surface_height, x, y,
+                               type, 32u);
 }
 
 #endif

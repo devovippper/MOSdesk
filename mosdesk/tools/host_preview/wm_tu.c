@@ -28,3 +28,20 @@ uint32_t* wm_frame(int menu_open, int cx, int cy, const char* status) {
     render(windows, count);
     return harness_fb;
 }
+
+/* Loads cursor `status` through the real mosWM code path (pack lookup, .cur /
+ * .ani decoding, 32x32 size selection) and returns the decoded sprite. */
+int wm_cursor_sprite(uint32_t status, const uint32_t** px, uint32_t* w, uint32_t* h,
+                     uint32_t* hx, uint32_t* hy, uint32_t* frames, uint32_t* delay_ms) {
+    mos_graphics_info(&display);
+    load_desktop_settings();
+    cached_cursor_status = UINT32_MAX; cached_cursor_pack[0] = 0;
+    status_message[0] = 0;
+    ensure_cursor_loaded(NULL, status);
+    if (!cursor_width || !cursor_height) return 0;
+    *px = cursor_animation_pixels ? cursor_animation_pixels : cursor_pixels;
+    *w = cursor_width; *h = cursor_height; *hx = cursor_hotspot_x; *hy = cursor_hotspot_y;
+    *frames = cursor_animation_pixels ? cursor_animation_frame_count : 1u;
+    *delay_ms = cursor_animation_pixels ? cursor_animation_frame_delay_ms : 0u;
+    return 1;
+}

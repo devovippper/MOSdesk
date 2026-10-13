@@ -757,19 +757,19 @@ static void draw_desktop_icons(void) {
         moswm_file_icon_t icon;
         const char* label;
     } items[] = {
-        {MOSWM_ICON_FOLDER, "Home"},
-        {MOSWM_ICON_DRIVE, "System"},
+        {MOSWM_ICON_HOME, "Home"},
+        {MOSWM_ICON_COMPUTER, "System"},
         {MOSWM_ICON_DOCUMENT, "Readme"},
         {MOSWM_ICON_CODE, "Source"}
     };
     for (uint32_t i = 0; i < sizeof(items) / sizeof(items[0]); i++)
     {
-        int32_t icon_y = 30 + (int32_t)i * 66;
-        moswm_draw_file_icon(canvas, display.width, display.height,
-                             40, icon_y, items[i].icon);
+        int32_t icon_y = 14 + (int32_t)i * 98;
+        moswm_draw_file_icon_sized(canvas, display.width, display.height,
+                                   24, icon_y, items[i].icon, 64u);
         int32_t label_x = 56 - (int32_t)moswm_text_width(items[i].label, 2) / 2;
         if (label_x < 4) label_x = 4;
-        wm_text(label_x, icon_y + 38, items[i].label, 0xFFF2F6F8u,
+        wm_text(label_x, icon_y + 68, items[i].label, 0xFFF2F6F8u,
                 0x99000000u, 2);
     }
 }
@@ -1200,8 +1200,8 @@ static void draw_taskbar(const syscall_window_info_t* windows,
         if (item_hover)
             fill_rounded_rect(20, top - 166, 270, 36, 6,
                               0x55000000u | (accent & 0xFFFFFFu));
-        moswm_draw_file_icon(canvas, display.width, display.height,
-                             35, top - 163, MOSWM_ICON_SETTINGS);
+        moswm_draw_file_icon_sized(canvas, display.width, display.height,
+                                   28, top - 164, MOSWM_ICON_SETTINGS, 32u);
         wm_text(80, top - 156, "Settings", 0xFFF2F6F9u, 0, 2);
         fill_rect(30, top - 46, 250, 1, 0xFF353C42u);
         wm_text(30, top - 33, "Open windows from the panel", 0xFF8A9AA6u, 0, 1);

@@ -46,6 +46,31 @@ The build creates the MOSdesk Settings window client, exported text-rendering
 libraries, and the required mosWM desktop shell. It produces
 `mosdesk/dist/mosdesk.mpkg` and `mosWM/dist/mosWM.mpkg`.
 
+## Icons
+
+MOSdesk ships a 16-icon, 64x64 pixel-art set (folder, drive, document, PDF,
+image, audio, video, code, archive, settings, network, pointer, home,
+computer, appearance, mouse). The art is defined in
+`mosdesk/tools/icons/icons.py` and compiled into `mosWM/file_icon_data.h`
+(palette + run-length encoded, ~20 KB). `moswm_draw_file_icon_sized()` draws any
+size; 64 is pixel-perfect and other sizes are area-averaged.
+
+```sh
+python3 mosdesk/tools/icons/generate_icons.py   # regenerates the header, the
+                                                # SVG sprite and icons/pixel/*.png
+```
+
+## Cursor showcase
+
+```sh
+./mosdesk/tools/host_preview/cursors.sh [outdir]
+```
+
+Builds the real mosWM cursor loader on the host and writes
+`posy_cursor_states.png` (all 14 states), `posy_cursor_in_context.png`
+(real compositor frames), `posy_cursor_animated.gif` (busy / working) and
+`posy_cursor_source_128.png` (the 128 px source art). Needs gcc and Pillow.
+
 ## Preview MOSdesk
 
 To view the desktop layout in a browser without building or booting Minimal-OS:

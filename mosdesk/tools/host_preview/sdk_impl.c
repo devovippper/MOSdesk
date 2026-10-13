@@ -8,6 +8,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+uint32_t harness_cursor_status; uint64_t harness_uptime_ms;
 uint32_t* harness_fb; uint32_t harness_w = 1280, harness_h = 720;
 syscall_window_info_t harness_windows[8]; int harness_nwin;
 uint32_t* harness_frames[8]; /* per-window surface, same order as harness_windows */
@@ -25,7 +26,7 @@ uint64_t mos_syscall3(uint64_t n, uint64_t a, uint64_t b, uint64_t c) {
 uint64_t mos_syscall(uint64_t n, uint64_t a, uint64_t b, uint64_t c) { return mos_syscall3(n, a, b, c); }
 uint64_t mos_syscall1(uint64_t n, uint64_t a) {
     if (n == SYS_GETTIME) { memcpy((void*)(uintptr_t)a, &harness_time, sizeof harness_time); return 0; }
-    if (n == SYS_UPTIME) return 0;
+    if (n == SYS_UPTIME) return harness_uptime_ms;
     return (uint64_t)-1;
 }
 uint64_t mos_graphics_acquire(void) { return 0; }
@@ -58,5 +59,5 @@ uint64_t mos_window_set_resizable(uint32_t id, bool b) { (void)id; (void)b; retu
 uint64_t mos_window_set_style(uint32_t id, syscall_window_style_t s) { (void)id; (void)s; return 0; }
 uint64_t mos_window_next_event(uint32_t id, syscall_window_event_t* e) { (void)id; (void)e; return 1; }
 uint64_t mos_window_get_info(uint32_t id, syscall_window_info_t* i) { (void)id; (void)i; return 1; }
-uint64_t mos_window_get_cursor_state(syscall_cursor_state_t* state) { if (state) memset(state, 0, sizeof(*state)); return 0; }
+uint64_t mos_window_get_cursor_state(syscall_cursor_state_t* state) { if (state) { memset(state, 0, sizeof(*state)); state->status = harness_cursor_status; } return 0; }
 uint64_t mos_window_present(uint32_t id, const uint32_t* px, uint32_t pitch, int32_t x, int32_t y, int32_t w, int32_t h) { (void)id;(void)px;(void)pitch;(void)x;(void)y;(void)w;(void)h; return 0; }
